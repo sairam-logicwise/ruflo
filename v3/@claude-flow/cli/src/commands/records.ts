@@ -43,6 +43,7 @@ import {
   formatValidationError,
 } from './records-io.js';
 import decomposeCommand from './decompose.js';
+import taskVerifyCommand from './task-verify.js';
 
 // ---------------------------------------------------------------------------
 // Requirement
@@ -221,7 +222,13 @@ const taskNewCommand: Command = {
     // pre-empting the more useful citation-contract message below.
     { name: 'citations', description: 'Comma-separated ids — must include at least one requirement or decision', type: 'string' },
     { name: 'priority', description: 'p0|p1|p2', type: 'string', default: 'p2' },
-    { name: 'status', description: 'drafted|specified|implementing|verifying|done|blocked (T15 state machine)', type: 'string', default: 'drafted' },
+    // Deliberately NO --status option (T19, review-2026-09-21.md's
+    // acceptance criterion "the agent has no API to set Done directly"):
+    // a real bug found via live testing — `--status=done` (equals syntax)
+    // let a brand-new task be created already "done", bypassing
+    // verification entirely. A new task always starts `drafted`, full
+    // stop; every other state is only earned through `record task verify`
+    // (T19) or the future gate (T16), never asserted at creation.
     { name: 'depends-on', description: 'Comma-separated task ids that must complete first', type: 'string' },
     { name: 'body', description: 'Markdown body text', type: 'string' },
     { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
@@ -254,7 +261,7 @@ const taskNewCommand: Command = {
       const frontmatter = {
         id,
         title,
-        status: (ctx.flags.status as string) ?? 'drafted',
+        status: 'drafted',
         priority: (ctx.flags.priority as string) ?? 'p2',
         createdAt: now,
         updatedAt: now,
@@ -300,7 +307,7 @@ const taskListCommand: Command = {
 const recordTaskCommand: Command = {
   name: 'task',
   description: 'Task records — the "what work" (T3/T4, agentic SDLC plan). Not to be confused with `ruflo task`, the swarm/agent runtime task command.',
-  subcommands: [taskNewCommand, taskShowCommand, taskListCommand],
+  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskVerifyCommand],
   action: taskListCommand.action,
 };
 

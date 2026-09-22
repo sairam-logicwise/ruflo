@@ -1012,16 +1012,71 @@ citing requirement) valid.
 **Why this matters:** This is the mechanism behind requirement 8 and the reason it works. An agent that can set its own done field will eventually set it while the suite is red — not from malice but because it believes it succeeded. Deriving status from evidence removes the question. The model is borrowed from rtmx, which derives requirement status from linked test results; the coverage parser already exists and works on real istanbul and lcov output.
 
 **Acceptance criteria:**
-- [ ] Engine runs the configured test command and captures the result
-- [ ] Coverage is parsed and compared against the task's threshold
-- [ ] `Done` is unreachable while tests are red or coverage is below threshold
-- [ ] The agent has no API to set `Done` directly
+- [x] Engine runs the configured test command and captures the result
+- [x] Coverage is parsed and compared against the task's threshold
+- [x] `Done` is unreachable while tests are red or coverage is below threshold
+- [x] The agent has no API to set `Done` directly
 
 **Verification:**
-- [ ] Test: red suite blocks the transition
-- [ ] Test: green suite below coverage threshold blocks the transition
-- [ ] Test: green and above threshold permits it
-- [ ] Manual: confirm there is no bypass path
+- [x] Test: red suite blocks the transition
+- [x] Test: green suite below coverage threshold blocks the transition
+- [x] Test: green and above threshold permits it
+- [x] Manual: confirm there is no bypass path
+
+**Done 2026-09-22.** New `src/ruvector/test-runner.ts`: `runTests()` spawns
+the project's own test command (`package.json`'s `scripts.test`, or an
+explicit override) and derives `passed` STRICTLY from the real exit code
+— never from parsing stdout/stderr text, which an agent (or a flaky test
+framework) could make say anything. `getOverallCoverage()` (new, small
+export alongside the existing `coverageGaps()` in `coverage-router.ts`,
+per the plan's own citation) supplies the coverage number; `coverageGaps()`
+itself supplies the specific under-threshold files for a useful blocked
+message. `verifyTask()` feeds that real evidence into T15's
+`attemptTransition(task, 'verifying', {testResult})` — the exact context
+shape T15 was built to accept.
+
+New `ruflo record task verify <id>` command (`src/commands/verify.ts`,
+following T6's separate-module pattern) is the only status-mutating
+command this CLI exposes for an EXISTING task: it refuses anything not
+currently `verifying`, runs `verifyTask`, and writes the resulting
+`status` (+ a new `blocked: {reason, unblockCondition, fromState}` field
+on `TaskSchema` when it fails) back — no `--status` override anywhere on
+it, by construction.
+
+**A real, genuine bypass found via live testing, not any unit test**:
+`record task new --status=done` (equals syntax specifically — the
+space-separated form happened to error instead) let a brand-new task be
+created already `"done"`, skipping verification entirely. Fixed by
+removing the `--status` option from task creation altogether — a new task
+now always starts `drafted`, full stop; every other state is earned only
+through `record task verify` or the future gate (T16). Verified the fix
+directly: the same bypass attempt now silently creates a normal `drafted`
+task instead. Added a permanent regression test.
+
+**Also fixed while touching this file, not preemptively**: `TaskSchema`'s
+long-flagged `.strict().refine()` composability problem
+(review-2026-09-21.md's Suggestions) — this is the fourth task in a row
+to need to hand-edit `task.ts` (T8's `actuals`, T18's `doneCriteria`, now
+T19's `blocked` field), so the friction the review warned about was no
+longer hypothetical. `TaskObjectSchema` is now exported separately
+(genuinely `.extend()`-able, verified directly) with `TaskSchema` applying
+the citation-contract `.refine()` on top, same validated behavior.
+
+Real end-to-end verification via the compiled CLI, not just mocks:
+a real `npm test` with a command that PRINTS "ALL TESTS PASSED" to stdout
+but exits 1 was still correctly derived as failed and routed to
+`blocked`, with the real reason/unblock-condition/fromState persisted
+into the record; a real passing command correctly reached `done`; and
+re-running `verify` on an already-`blocked` task was correctly refused
+(no bypass by re-running).
+
+11 unit tests over `test-runner.ts` (exit-code derivation including the
+lying-stdout case, timeout-as-failure, command resolution, coverage
+wiring) mocking `node:child_process` directly — the real I/O boundary,
+not an injected fake. 7 more over the `verify` command itself (refusing a
+wrong-state task, writing `done`/`blocked` correctly, clearing stale
+`blocked` info on success, the written record always validating, and no
+`--status` option existing on the command at all).
 
 **Dependencies:** T15, T18
 **Files likely touched:** `v3/@claude-flow/cli/src/ruvector/coverage-router.ts`, state machine, new runner, tests

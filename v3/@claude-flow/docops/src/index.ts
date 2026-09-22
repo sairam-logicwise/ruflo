@@ -28,17 +28,20 @@ export {
 
 export {
   TaskSchema,
+  TaskObjectSchema,
   TaskStatusSchema,
   TaskPrioritySchema,
   EstimateSchema,
   ActualsSchema,
   DoneCriteriaSchema,
+  BlockedSchema,
   type Task,
   type TaskStatus,
   type TaskPriority,
   type Estimate,
   type Actuals,
   type DoneCriteria,
+  type Blocked,
 } from './schemas/task.js';
 
 export { computeContentHash } from './content-hash.js';

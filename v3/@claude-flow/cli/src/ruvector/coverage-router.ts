@@ -440,6 +440,20 @@ export async function coverageSuggest(
 }
 
 /**
+ * T19 (agentic SDLC plan) — the overall project coverage percentage, or
+ * null when no coverage report exists yet (the caller decides how to
+ * treat that — e.g. "coverage required but not measured" is itself a
+ * reason to block, not a silent pass). A thin wrapper over the same
+ * coverage-loading path `coverageGaps()` uses, for a caller (the T19 test
+ * runner) that needs a single number to compare against a task's own
+ * declared threshold, not a per-file gap list.
+ */
+export async function getOverallCoverage(projectRoot?: string, skipCache?: boolean): Promise<number | null> {
+  const report = await loadProjectCoverage(projectRoot, skipCache);
+  return report?.overall ?? null;
+}
+
+/**
  * List all coverage gaps with agent assignments
  */
 export async function coverageGaps(

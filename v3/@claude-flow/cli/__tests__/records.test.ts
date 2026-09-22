@@ -130,6 +130,23 @@ describe('ruflo record', () => {
       expect(result?.success).toBe(false);
     });
 
+    it('always creates a task as drafted, even if a status flag is passed (T19: no API to set Done directly)', async () => {
+      // Real bug found via live testing, not this suite: --status=done
+      // (equals syntax) used to slip through to the frontmatter builder
+      // and create a task already "done", bypassing verification (T19)
+      // entirely. `ctx.flags` below mimics the CLI's equals-syntax parse
+      // result directly, since sub()-driven tests build ctx by hand.
+      ctx.flags = { title: 'req one', _: [] };
+      const req = await sub(recordCommand, 'req', 'new').action!(ctx);
+      const reqId = (req?.data as { id: string }).id;
+
+      ctx.flags = { title: 'sneaky task', citations: reqId, status: 'done', _: [] };
+      const result = await sub(recordCommand, 'task', 'new').action!(ctx);
+      expect(result?.success).toBe(true);
+      const { path } = result?.data as { path: string };
+      expect(readFileSync(path, 'utf8')).toContain('status: drafted');
+    });
+
     it('creates a task when it cites a requirement, and the file validates', async () => {
       ctx.flags = { title: 'req one', _: [] };
       const req = await sub(recordCommand, 'req', 'new').action!(ctx);
