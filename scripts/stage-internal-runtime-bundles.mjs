@@ -31,6 +31,12 @@ const INTERNAL_RUNTIME_PACKAGES = [
     optionalAssets: ['README.md'],
   },
   {
+    directory: 'docops',
+    name: '@claude-flow/docops',
+    requiredAssets: ['dist'],
+    optionalAssets: ['README.md', 'LICENSE', 'ATTRIBUTION.md'],
+  },
+  {
     directory: 'mcp',
     name: '@claude-flow/mcp',
     requiredAssets: ['dist'],

@@ -1,0 +1,81 @@
+{
+  "$ref": "#/definitions/decision",
+  "definitions": {
+    "decision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^DEC-\\d+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recordId"
+          },
+          "default": []
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "provenance": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent-inferred"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "accepted",
+            "superseded"
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recordId"
+          },
+          "default": []
+        },
+        "related": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recordId"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "createdAt",
+        "updatedAt",
+        "contentHash",
+        "provenance",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "recordId": {
+      "type": "string",
+      "pattern": "^(REQ|DEC|TASK)-\\d+$"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

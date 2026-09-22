@@ -37,30 +37,11 @@
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-
-// ---------------------------------------------------------------------------
-// Pricing constants for cost estimation
-// ---------------------------------------------------------------------------
-
-const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> = {
-  'claude-haiku-4-5': { inputPerM: 0.25, outputPerM: 1.25 },
-  'claude-haiku-3': { inputPerM: 0.25, outputPerM: 1.25 },
-  'claude-sonnet-4-5': { inputPerM: 3.0, outputPerM: 15.0 },
-  'claude-sonnet-4-6': { inputPerM: 3.0, outputPerM: 15.0 },
-  'claude-opus-4-5': { inputPerM: 15.0, outputPerM: 75.0 },
-};
-
-function estimateCost(
-  model: string,
-  totalInputTokens: number,
-  totalOutputTokens: number,
-): number {
-  const pricing = MODEL_PRICING[model] ?? { inputPerM: 3.0, outputPerM: 15.0 };
-  return (
-    (totalInputTokens / 1_000_000) * pricing.inputPerM +
-    (totalOutputTokens / 1_000_000) * pricing.outputPerM
-  );
-}
+// T12 (agentic SDLC plan) — gaia-bench used to carry its own price table
+// that silently disagreed with model-prices.ts (e.g. haiku-4.5 at $0.25/M
+// here vs $1.00/M there). There is now exactly one price table; this file
+// just calls it.
+import { blendedPrice, costUsd } from '../ruvector/model-prices.js';
 
 // ---------------------------------------------------------------------------
 // Result types (matches PR7 workflow contract)
@@ -251,6 +232,23 @@ const runCommand: Command = {
     const modelsRaw = String(ctx.flags.models ?? 'claude-haiku-4-5');
     const models = modelsRaw.split(',').map((m) => m.trim()).filter(Boolean);
     const outputFormat = String(ctx.flags.output ?? 'text');
+    // T12 — validate every requested model has a price BEFORE spending any
+    // tokens on agent calls. Failing here is cheap; failing after the run
+    // (previous behavior: silently guess $3/$15 per Mtok) throws away real
+    // results just to report a made-up cost.
+    for (const m of models) {
+      try {
+        blendedPrice(m);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (outputFormat === 'json') {
+          process.stdout.write(JSON.stringify({ error: msg }, null, 2) + '\n');
+        } else {
+          output.writeln(output.error(msg));
+        }
+        return { success: false };
+      }
+    }
     const concurrency = parseInt(String(ctx.flags.concurrency ?? '3'), 10);
     // Parser converts --smoke-only to camelCase "smokeOnly"
     const smokeOnly = ctx.flags['smokeOnly'] === true || ctx.flags['smokeOnly'] === 'true' ||
@@ -608,7 +606,7 @@ const runCommand: Command = {
       const passed = results.filter((r) => r.correct).length;
       const total = results.length;
       const passRate = total > 0 ? passed / total : 0;
-      const estCostUsd = estimateCost(model, totalInputTokens, totalOutputTokens);
+      const estCostUsd = costUsd(model, totalInputTokens, totalOutputTokens);
 
       const modelOutput: BenchRunOutput = {
         level,

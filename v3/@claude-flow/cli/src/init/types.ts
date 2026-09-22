@@ -195,6 +195,12 @@ export interface MCPConfig {
   ruvSwarm: boolean;
   /** Include flow-nexus MCP server */
   flowNexus: boolean;
+  /**
+   * Include the Graphify MCP server (T1, agentic SDLC plan) — local code
+   * graph queries, zero token cost, no auth. Unlike ruvSwarm/flowNexus this
+   * isn't cloud/auth-gated, so it stays on under --full without --cloud-mcp.
+   */
+  graphify: boolean;
   /** Auto-start MCP server */
   autoStart: boolean;
   /** Server port */
@@ -442,6 +448,7 @@ export const DEFAULT_INIT_OPTIONS: InitOptions = {
     claudeFlow: true,
     ruvSwarm: false,
     flowNexus: false,
+    graphify: true,
     autoStart: false,
     port: 3000,
   },
@@ -573,6 +580,7 @@ export const FULL_INIT_OPTIONS: InitOptions = {
     claudeFlow: true,
     ruvSwarm: true,
     flowNexus: true,
+    graphify: true,
     autoStart: false,
     port: 3000,
   },

@@ -1,0 +1,33 @@
+{
+  "name": "@claude-flow/docops",
+  "version": "3.0.0-alpha.1",
+  "type": "module",
+  "description": "Typed record substrate (requirement/decision/task) for the agentic SDLC — schemas adapted from vendored DocOps (see ATTRIBUTION.md), reimplemented natively rather than depended on",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc",
+    "generate-schemas": "tsx scripts/generate-json-schemas.ts"
+  },
+  "dependencies": {
+    "js-yaml": "^4.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "tsx": "^4.19.0",
+    "vitest": "^4.1.0",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "v3alpha"
+  }
+}

@@ -665,7 +665,9 @@ describe('router-trajectory (ADR-148)', () => {
       expect(row2.tokens).toBeUndefined();
       expect(row2.cost_usd).toBeUndefined();
 
-      // Unknown model falls back to $1/Mtok blended, doesn't drop.
+      // T12 — unknown model no longer falls back to a guessed rate. The
+      // row is still written (task/quality telemetry is worth keeping),
+      // but cost_usd is omitted rather than fabricated.
       __resetTrajectoryRecorderForTests();
       const path3 = join(tmp, 'unknown.jsonl');
       process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path3;
@@ -677,7 +679,9 @@ describe('router-trajectory (ADR-148)', () => {
         modelId: 'some/unknown-model',
       });
       const row3 = JSON.parse(readFileSync(path3, 'utf8').trim());
-      expect(row3.cost_usd).toBeCloseTo(0.002, 5); // 2000 tokens × $1/Mtok blended = $0.002
+      expect(row3.cost_usd).toBeUndefined();
+      expect(row3.model_id).toBe('some/unknown-model');
+      expect(row3.quality).toBe(1.0);
     } finally {
       delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY;
       delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH;

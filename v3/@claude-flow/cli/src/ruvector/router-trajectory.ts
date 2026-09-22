@@ -34,7 +34,7 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 
 import type { ClaudeModel } from './model-router.js';
 import type { NeuralRoutedBy } from './neural-router.js';
-import { costUsd } from './model-prices.js';
+import { costUsd, UnknownModelPriceError } from './model-prices.js';
 
 // ============================================================================
 // Schema (versioned)
@@ -271,9 +271,20 @@ export function recordTrajectoryOutcome(args: {
   // iter 31 — compute USD spend at write time using the canonical price
   // table. Cost is a first-class field so consumers don't need to JOIN
   // against the decision row (which may live in a rotated file).
-  const cost_usd = args.tokens && (args.tokens.input > 0 || args.tokens.output > 0)
-    ? costUsd(args.modelId, args.tokens.input, args.tokens.output)
-    : undefined;
+  //
+  // T12 — costUsd now throws on an unrecognized model instead of guessing
+  // a rate. Telemetry is best-effort: on an unpriceable model, omit
+  // cost_usd rather than dropping the whole outcome row (task/quality are
+  // still worth keeping).
+  let cost_usd: number | undefined;
+  if (args.tokens && (args.tokens.input > 0 || args.tokens.output > 0)) {
+    try {
+      cost_usd = costUsd(args.modelId, args.tokens.input, args.tokens.output);
+    } catch (err) {
+      if (!(err instanceof UnknownModelPriceError)) throw err;
+      cost_usd = undefined;
+    }
+  }
   const row: TrajectoryOutcomeRow = {
     v: 1, type: 'outcome',
     ts: new Date().toISOString(),

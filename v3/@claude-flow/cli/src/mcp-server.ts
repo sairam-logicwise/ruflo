@@ -27,6 +27,7 @@ import * as os from 'os';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { trackRequest } from './mcp-tools/request-tracker.js';
+import { countTokens } from './ruvector/token-count.js';
 import {
   isPolicyEnforcementEnabled,
   loadMcpPolicy,
@@ -130,8 +131,9 @@ export function assessMcpSchemaOverhead(
     description: tool.description,
     inputSchema: tool.inputSchema,
   }));
-  const bytes = Buffer.byteLength(JSON.stringify(catalogue), 'utf8');
-  const estimatedTokens = Math.ceil(bytes / 4);
+  const json = JSON.stringify(catalogue);
+  const bytes = Buffer.byteLength(json, 'utf8');
+  const estimatedTokens = countTokens(json);
   const validWindow = Number.isFinite(contextWindowTokens) && Number(contextWindowTokens) > 0
     ? Number(contextWindowTokens)
     : undefined;

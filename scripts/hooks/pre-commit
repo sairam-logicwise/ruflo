@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+/**
+ * pre-commit — citation contract, tier 2 of 3 (T5, agentic SDLC plan).
+ *
+ * Validates every STAGED record file (docs/{requirements,decisions,tasks}/
+ * *.md) against its schema, using @claude-flow/docops (T3/T4). Bypassable
+ * with `--no-verify` — that's intentional (plan.md's own reasoning: this
+ * tier is fast local feedback, not the contract; CI is the real gate,
+ * tier 3, and repeats this same check where it can't be skipped).
+ *
+ * Only inspects files that are actually staged in THIS commit — a repo
+ * with thousands of records still commits in milliseconds, and a normal
+ * code-only commit does no record work at all.
+ *
+ * Checks the STAGED blob content (`git show :<path>`), not the working-tree
+ * file — a file can be `git add`-ed and then edited again before commit;
+ * checking the working tree would validate content that isn't actually
+ * about to be committed.
+ *
+ * The actual decision logic lives in ./pre-commit-lib.mjs (pure, unit
+ * tested in scripts/__tests__/pre-commit-hook.test.mjs) — this file is
+ * just the I/O wiring: git subprocess calls, loading docops, and the
+ * process exit code git actually reads.
+ *
+ * Installed via `scripts/install-git-hooks.mjs` (wired to the root
+ * package.json's `prepare` script) — this file is the source of truth;
+ * `.git/hooks/pre-commit` is a copy of it, since `.git/hooks/` itself is
+ * never version-controlled.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { evaluateStagedRecords, RECORD_PATH_PATTERN } from './pre-commit-lib.mjs';
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// Set once `stagedFiles()` succeeds, read by the crash handler below. A
+// crash with no record files in scope is a hook bug unrelated to the
+// commit's content — fail open. A crash WITH records in scope means we
+// don't know whether they're valid — fail closed rather than risk exactly
+// what this hook exists to catch (see C2, review-2026-09-21.md).
+let recordPathsPresent = false;
+
+function stagedFiles() {
+  // -z: NUL-terminated, unquoted paths. Without it, git's default
+  // core.quotePath renders any non-ASCII filename as a quoted octal escape
+  // (e.g. "docs/tasks/t\303\241sk.md"), which RECORD_PATH_PATTERN never
+  // matches — the file silently skips validation (Important 15,
+  // review-2026-09-21.md).
+  const out = execFileSync(
+    'git',
+    ['diff', '--cached', '--name-only', '--diff-filter=ACM', '-z'],
+    { cwd: repoRoot, encoding: 'utf8' },
+  );
+  return out.split('\0').filter(Boolean);
+}
+
+function stagedContent(path) {
+  return execFileSync('git', ['show', `:${path}`], { cwd: repoRoot, encoding: 'utf8' });
+}
+
+async function loadDocops() {
+  const distEntry = join(repoRoot, 'v3', '@claude-flow', 'docops', 'dist', 'index.js');
+  if (!existsSync(distEntry)) return null;
+  return import(`file://${distEntry}`);
+}
+
+async function main() {
+  const changed = stagedFiles();
+  recordPathsPresent = changed.some((p) => RECORD_PATH_PATTERN.test(p));
+  const docops = await loadDocops();
+  const { status, failures } = evaluateStagedRecords(changed, stagedContent, docops);
+
+  if (status === 'skipped-not-built') {
+    console.warn(
+      '[pre-commit] docs/ record(s) changed, but @claude-flow/docops is not built ' +
+        '(v3/@claude-flow/docops/dist missing) — cannot validate. Allowing the commit; ' +
+        'CI will still catch a broken record. Build it with: cd v3/@claude-flow/docops && npm run build',
+    );
+    process.exit(0);
+  }
+
+  if (status === 'blocked') {
+    console.error(`[pre-commit] ${failures.length} record(s) failed the citation contract / schema:\n`);
+    for (const f of failures) {
+      console.error(`  ${f.path}`);
+      console.error(`    ${f.message}\n`);
+    }
+    console.error('Fix the record(s) above, or bypass with `git commit --no-verify` (CI will still catch it).');
+    process.exit(1);
+  }
+
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error('[pre-commit] hook crashed unexpectedly.');
+  console.error(err);
+  if (recordPathsPresent) {
+    console.error(
+      '[pre-commit] Record files were staged in this commit and could not be validated because ' +
+        'of the crash above — blocking rather than risking an unvalidated record. ' +
+        'Bypass with `git commit --no-verify` if you are sure the record(s) are fine.',
+    );
+    process.exit(1);
+  }
+  console.error('[pre-commit] No record files were staged — allowing the commit rather than blocking on an unrelated hook bug.');
+  process.exit(0);
+});

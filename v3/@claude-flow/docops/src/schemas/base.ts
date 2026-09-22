@@ -1,0 +1,64 @@
+/**
+ * base.ts — fields shared by every record kind (T3, agentic SDLC plan).
+ *
+ * Adapted from the vendored DocOps schema (../../vendor/schema/types.go) —
+ * see ../../ATTRIBUTION.md. Deliberate departures from upstream:
+ *   - DocOps's Context type carries no `status`; every kind here does,
+ *     because the plan's own Task 3 description requires it uniformly.
+ *   - DocOps calls this type "Context" (CTX-); we call it "Requirement"
+ *     (REQ-) to match the plan's own language throughout ("a task must
+ *     cite at least one requirement or decision").
+ *
+ * @module schemas/base
+ */
+
+import { z } from 'zod';
+
+/** The three record kinds and their id prefixes. */
+export const RECORD_PREFIXES = {
+  requirement: 'REQ',
+  decision: 'DEC',
+  task: 'TASK',
+} as const;
+
+export type RecordKind = keyof typeof RECORD_PREFIXES;
+
+/** A stable id: `<PREFIX>-<digits>`, e.g. `REQ-001`, `DEC-012`, `TASK-003`. */
+export const RecordIdSchema = z
+  .string()
+  .regex(/^(REQ|DEC|TASK)-\d+$/, 'id must match <REQ|DEC|TASK>-<digits>');
+
+/**
+ * Distinguishes a human-authored record from one an agent inferred from
+ * existing code/docs (T24's backfill). Load-bearing: without this, a
+ * guessed requirement becomes indistinguishable from an authored one and
+ * the substrate stops being trustworthy (plan.md Task 3 rationale).
+ */
+export const ProvenanceSchema = z.enum(['human', 'agent-inferred']);
+export type Provenance = z.infer<typeof ProvenanceSchema>;
+
+/** SHA-256 hex digest of a record's content — see ../content-hash.ts. */
+export const ContentHashSchema = z.string().regex(/^[0-9a-f]{64}$/, 'contentHash must be a sha256 hex digest');
+
+/**
+ * Fields every record kind carries, per plan.md Task 3: "Every record
+ * carries a stable id, status, created and updated dates, citations, a
+ * content hash, and a provenance field." `status` and `id` are typed more
+ * specifically per kind, so they're declared here as the common shape but
+ * re-narrowed in each kind's own schema rather than spread verbatim.
+ */
+export const BaseRecordShape = {
+  id: RecordIdSchema,
+  title: z.string().min(1, 'title must not be empty'),
+  createdAt: z.string().datetime({ message: 'createdAt must be an ISO-8601 datetime' }),
+  updatedAt: z.string().datetime({ message: 'updatedAt must be an ISO-8601 datetime' }),
+  /**
+   * Ids this record cites. Optional and unconstrained at the base level —
+   * TaskSchema overrides this with a non-empty, requirement-or-decision
+   * refinement (the plan's citation contract applies to tasks only,
+   * mirroring DocOps: "ADRs and CTX do not have to cite anything").
+   */
+  citations: z.array(RecordIdSchema).default([]),
+  contentHash: ContentHashSchema,
+  provenance: ProvenanceSchema,
+};

@@ -145,11 +145,32 @@ function main() {
     modelMeanLatency[m] = mean(arr);
   }
 
+  // I9 (review-2026-09-22.md): predictedCostUsd is computed upstream with
+  // outputTokens forced to 0 (model-router.ts — a documented cost FLOOR,
+  // since a not-yet-run model's real output length is unknowable). Used
+  // raw as a disagreement row's counterfactual cost, that floor can ONLY
+  // understate SER's true cost, never overstate it — a one-directional
+  // bias that could let a genuinely more expensive candidate manufacture a
+  // false pass on the `cost < 1%` criterion below. Rather than guess a
+  // token ratio to shrink the floor (unverifiable without real historical
+  // token data this repo doesn't have), clamp it here: a disagreement row
+  // is never credited with cost savings this analysis can't verify — at
+  // worst, SER is assumed to cost exactly what bandit's real, executed
+  // pick cost on that same task, never less. A genuinely cheaper router
+  // still passes on the strength of its verified (agreed-pick) rows and
+  // any disagreement rows where even this floor exceeds bandit's actual
+  // cost; it just can't win SOLELY off an unproven estimate.
+  let clampedDisagreementRows = 0;
   const serOutcomes = usable.map((r) => {
     const agreed = r.bandit.pick === r.ser.pick;
+    let usdActual = agreed ? r.outcome.actualUsd : r.ser.predictedCostUsd;
+    if (!agreed && usdActual < r.outcome.actualUsd) {
+      usdActual = r.outcome.actualUsd;
+      clampedDisagreementRows++;
+    }
     return {
       qualityActual: agreed ? r.outcome.actualQuality : r.ser.predictedQuality,
-      usdActual: agreed ? r.outcome.actualUsd : r.ser.predictedCostUsd,
+      usdActual,
       latencyActual: agreed
         ? r.outcome.actualLatencyMs
         : (modelMeanLatency[r.ser.pick] ?? r.outcome.actualLatencyMs),
@@ -189,6 +210,11 @@ function main() {
     disagreement: {
       count: disagreements,
       pct: Math.round(disagreementPct * 100) / 100,
+      // I9 — of the disagreement rows, how many had their unverified cost
+      // estimate clamped up to bandit's real cost (see serOutcomes above).
+      // A high count here means the cost criterion is leaning on verified
+      // data rather than the floor estimate — informational, not a gate.
+      costEstimateClamped: clampedDisagreementRows,
     },
     bandit: {
       meanQuality: Math.round(banditQuality * 10000) / 10000,

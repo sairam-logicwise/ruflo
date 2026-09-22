@@ -7,6 +7,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { select, confirm, input } from '../prompt.js';
 import { callMCPTool, MCPClientError } from '../mcp-client.js';
+import { countTokens } from '../ruvector/token-count.js';
 import { storeCommand } from './transfer-store.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -4953,8 +4954,8 @@ const tokenOptimizeCommand: Command = {
         const memories = await reasoningBank.retrieveMemories(query, { k: 5 });
         const compactPrompt = reasoningBank.formatMemoriesForPrompt ? reasoningBank.formatMemoriesForPrompt(memories) : '';
         // Estimate based on actual query vs compact prompt size difference
-        const queryTokenEstimate = Math.ceil((query?.length || 0) / 4);
-        const used = Math.ceil((compactPrompt?.length || 0) / 4);
+        const queryTokenEstimate = countTokens(query ?? '');
+        const used = countTokens(compactPrompt ?? '');
         const tokensSaved = Math.max(0, queryTokenEstimate - used);
         stats.totalTokensSaved += tokensSaved;
         stats.memoriesRetrieved += Array.isArray(memories) ? memories.length : 0;

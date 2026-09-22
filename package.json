@@ -50,6 +50,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "build:ts": "cd v3/@claude-flow/cli && npm run build || true",

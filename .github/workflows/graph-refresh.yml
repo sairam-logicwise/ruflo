@@ -1,0 +1,94 @@
+# Graphify graph refresh (T1, agentic SDLC plan — tasks/plan.md, tasks/HANDOVER.md §4).
+#
+# graphify-out/ is .gitignore'd — nothing is committed, so a fresh runner
+# starts with no graph. This job keeps a rolling Actions cache of it instead.
+#
+# Every run:
+#   1. Restores the most recent cached graph (empty cache on the very first
+#      run — `graphify update` builds an AST-only baseline from scratch in
+#      that case, so this still works cold).
+#   2. Re-extracts code via AST (`python3 -m graphify update .`) — pure
+#      Python, no LLM call, no API key, $0 token cost (verified by reading
+#      graphify v0.7.16's _rebuild_code(), which has no network call on this
+#      path, and by running it against this repo locally).
+#   3. Runs the cron-safe `check-update`, which flags pending semantic
+#      (docs/papers/images) re-extraction. Completing that headlessly would
+#      need a GEMINI_API_KEY/GOOGLE_API_KEY secret, which isn't configured —
+#      so this step only ever warns in the job summary. It is designed to
+#      always exit 0 and never blocks the merge; a human runs
+#      `/graphify --update` interactively in Claude Code/Cursor/etc. when
+#      convenient.
+#   4. Asserts the report's recorded commit now matches HEAD — the literal
+#      "fails when stale" gate, scoped to what CI can actually fix itself
+#      (the code graph). A failure here means step 2 silently produced a
+#      bad report, not that non-code content changed.
+#   5. Saves the refreshed graph back to the cache unconditionally.
+name: graph-refresh
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore graphify-out (rolling cache)
+        uses: actions/cache/restore@v4
+        with:
+          path: graphify-out
+          key: graphify-out-${{ github.run_id }}
+          restore-keys: |
+            graphify-out-
+
+      - name: Install graphify
+        # Pinned to the version this workflow's "$0, no LLM" behavior was
+        # verified against locally (review-2026-09-21.md, Important 13) —
+        # PyPI's latest moves independently of this file; bump deliberately.
+        run: pip install --quiet graphifyy==0.7.16
+
+      - name: Incremental code-only refresh (AST, no LLM, $0)
+        run: python3 -m graphify update .
+
+      - name: Check for pending semantic re-extraction (cron-safe — warns, never fails)
+        run: |
+          python3 -m graphify check-update . | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "(check-update always exits 0 — non-code re-extraction needs a human /graphify --update run, or a GEMINI_API_KEY/GOOGLE_API_KEY secret to do it headlessly)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the graph's recorded commit matches HEAD
+        run: |
+          set -e
+          HEAD=$(git rev-parse HEAD | cut -c1-8)
+          RECORDED=$(grep -oP 'Built from commit: `\K[0-9a-f]+' graphify-out/GRAPH_REPORT.md || true)
+          echo "HEAD=$HEAD RECORDED=${RECORDED:-<missing>}"
+          if [ -z "$RECORDED" ]; then
+            echo "::error::GRAPH_REPORT.md has no 'Built from commit' line — the update step likely failed silently."
+            exit 1
+          fi
+          if [ "$RECORDED" != "$HEAD" ]; then
+            echo "::error::Graph recorded commit ($RECORDED) does not match HEAD ($HEAD) even though the update step reported success."
+            exit 1
+          fi
+          echo "✓ graph is fresh at $RECORDED"
+
+      - name: Save refreshed graph to cache
+        # if: success() (the implicit default), not always() — Important 14,
+        # review-2026-09-21.md: always() cached a graph that failed the
+        # freshness assertion above, and restore-keys picks the most recent
+        # entry next run regardless of whether it was ever verified fresh.
+        # Skipping the save on failure just falls back to the last known
+        # good cache (or a cold rebuild) next run instead of poisoning it.
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: graphify-out
+          key: graphify-out-${{ github.run_id }}

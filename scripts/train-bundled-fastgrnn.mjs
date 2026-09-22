@@ -16,7 +16,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
 // iter 35 — single source of truth for prices.
-import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
+import { priceKnownCandidates } from './train-price-guard.mjs';
 
 const args = (() => {
   const a = { out: resolve('v3/@claude-flow/cli/assets/model-router/seed-router.fastgrnn.safetensors'), epochs: 40, hiddenDim: 12, lr: 0.05 };
@@ -36,7 +36,7 @@ console.log(`[fastgrnn] ${rows.length} rows, dim=${rows[0].embedding.length}, ca
 
 // iter 35 — derive per-candidate blended price from the shared module
 // instead of inlining a table that drifts from train-bundled-krr.mjs.
-const PRICES = Object.fromEntries(Object.keys(rows[0].scores).map(m => [m, blendedPrice(m)]));
+const PRICES = priceKnownCandidates(rows, 'fastgrnn');
 
 console.log(`[fastgrnn] checking native backend availability...`);
 const nativeAvailable = await mh.isNativeRouterAvailable();

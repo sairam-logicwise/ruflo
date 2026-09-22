@@ -99,6 +99,10 @@ const commandLoaders: Record<string, CommandLoader> = {
   spinner: () => import('./spinner.js'),
   // Ruflo entries in Claude Code's companyAnnouncements startup rotation (ADR-319)
   announcements: () => import('./announcements.js'),
+  // Typed record substrate — requirement/decision/task (T3/T4, agentic SDLC
+  // plan). Nested `record` to avoid colliding with the existing `task`
+  // command (swarm/agent runtime task orchestration — a different concept).
+  record: () => import('./records.js'),
   // AGNTCY/Outshift runtime transport selection (ADR-324 §2) — optional,
   // removable augmentation; no-ops to local transport when AGNTCY/SLIM is
   // not configured (RUFLO_AGNTCY_SLIM_ENDPOINT unset).

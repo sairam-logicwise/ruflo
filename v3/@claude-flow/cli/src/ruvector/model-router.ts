@@ -38,7 +38,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { dirname, join, resolve as resolvePath } from 'path';
+import { fileURLToPath } from 'url';
 
 // ----------------------------------------------------------------------------
 // Lazy module loaders — initialised once per process. The dynamic-import calls
@@ -63,6 +64,18 @@ function loadParallelRecorder(): Promise<typeof import('./router-parallel-record
   if (_parallelRecorderMod === null) _parallelRecorderMod = import('./router-parallel-recorder.js');
   return _parallelRecorderMod;
 }
+// T12 — same lazy-load convention, for pricing predictedCostUsd in the
+// parallel-log path below instead of hardcoding it to 0.
+let _modelPricesMod: Promise<typeof import('./model-prices.js')> | null = null;
+function loadModelPrices(): Promise<typeof import('./model-prices.js')> {
+  if (_modelPricesMod === null) _modelPricesMod = import('./model-prices.js');
+  return _modelPricesMod;
+}
+let _tokenCountMod: Promise<typeof import('./token-count.js')> | null = null;
+function loadTokenCount(): Promise<typeof import('./token-count.js')> {
+  if (_tokenCountMod === null) _tokenCountMod = import('./token-count.js');
+  return _tokenCountMod;
+}
 
 // ----------------------------------------------------------------------------
 // ADR-148 phase 2 — per-tier OpenRouter alternates. Loaded once per process
@@ -83,13 +96,22 @@ function loadOpenRouterAlts(): OpenRouterAlts | null {
   if (_altsProbeDone) return _altsCache;
   _altsProbeDone = true;
   try {
-    // Probe candidate paths: explicit env override, then asset locations
-    // relative to this file (src dev) and the dist build.
+    // Probe candidate paths: explicit env override, then module-relative
+    // locations (correct regardless of process.cwd() — B1,
+    // review-2026-09-22.md: the previous cwd-only probe returned null for
+    // any real `npx ruflo` invocation outside this repo, silently
+    // reintroducing C4's ~100x pricing bug), then cwd-relative as a last
+    // resort. Same pattern as neural-router.ts's getConfig().
     const explicit = process.env.CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS;
     const candidates: string[] = [];
     if (explicit) candidates.push(explicit);
-    // Probe asset dirs without using import.meta.url so this stays compatible
-    // with both CJS and ESM consumers of the compiled .js.
+    try {
+      const here = dirname(fileURLToPath(import.meta.url));
+      candidates.push(resolvePath(here, '..', '..', 'assets', 'model-router', 'openrouter-alts.json')); // src/ruvector → assets/...
+      candidates.push(resolvePath(here, '..', '..', '..', 'assets', 'model-router', 'openrouter-alts.json')); // dist/src/ruvector → assets/...
+    } catch {
+      // import.meta.url unavailable — fall through to cwd-relative below.
+    }
     candidates.push(join(process.cwd(), 'v3', '@claude-flow', 'cli', 'assets', 'model-router', 'openrouter-alts.json'));
     candidates.push(join(process.cwd(), 'assets', 'model-router', 'openrouter-alts.json'));
     for (const p of candidates) {
@@ -104,8 +126,13 @@ function loadOpenRouterAlts(): OpenRouterAlts | null {
   return null;
 }
 
-/** Return the resolved provider + OpenRouter model for the picked tier. */
-function resolveExecutionProvider(model: ClaudeModel): { provider: 'anthropic' | 'openrouter'; openrouterModel?: string } {
+/**
+ * Return the resolved provider + OpenRouter model for the picked tier.
+ * Exported for the C4 regression test (review-2026-09-21.md) — the bug was
+ * pricing this tier label directly against MODEL_PRICES instead of
+ * resolving through this function first.
+ */
+export function resolveExecutionProvider(model: ClaudeModel): { provider: 'anthropic' | 'openrouter'; openrouterModel?: string } {
   const explicit = process.env.CLAUDE_FLOW_ROUTER_PROVIDER?.toLowerCase();
   // Default: anthropic unless explicitly set to openrouter, or OPENROUTER_API_KEY
   // is the only credential present (matches agent-execute-core's selection).
@@ -730,27 +757,65 @@ export class ModelRouter {
       // adds zero overhead to the default routing path. Fire-and-forget
       // dynamic-import + recordPair; never blocks the route() return.
       if (process.env.CLAUDE_FLOW_ROUTER_PARALLEL_LOG === '1') {
-        loadParallelRecorder().then((mod) => {
-          try {
-            mod.recordPair({
-              task,
-              bandit: {
-                pick: banditOnly.model,
-                predictedQuality: banditOnly.confidence,
-                predictedCostUsd: 0,            // bandit doesn't price; analyzer uses outcome
-                backend: 'thompson-bandit',
-              },
-              ser: {
-                pick: picked.model,
-                predictedQuality: picked.confidence,
-                predictedCostUsd: 0,
-                backend: neuralPrior ? 'metaharness-router-hybrid' : 'bandit-only',
-              },
-            });
-          } catch {
-            // ADR-150 rule #3 — never throw from the routing path.
-          }
-        }).catch(() => { /* graceful degradation */ });
+        Promise.all([loadParallelRecorder(), loadModelPrices(), loadTokenCount()]).then(
+          ([mod, prices, tok]) => {
+            try {
+              // T12 — predictedCostUsd used to be hardcoded 0.
+              // C4 (review-2026-09-21.md) — pricing the tier label
+              // ('haiku'/'sonnet'/'opus'/'inherit') instead of the model
+              // that actually executes overstated cost by ~100x under
+              // CLAUDE_FLOW_ROUTER_PROVIDER=openrouter: the haiku tier's
+              // OpenRouter alt (inclusionai/ling-2.6-flash, $0.01/$0.03)
+              // is priced nothing like the tier label's anthropic default
+              // (claude-haiku-4.5, $1.00/$5.00). Resolve through the same
+              // resolveExecutionProvider() the actual dispatch path uses,
+              // so the priced model always matches the executed one. All
+              // four tiers' resolved ids (openrouter_alt or the tier label
+              // itself) are present in MODEL_PRICES, so costUsd here never
+              // throws on an unknown model.
+              // I9 (review-2026-09-21.md → re-flagged as unfixed in
+              // review-2026-09-22.md, since this comment alone wasn't a
+              // fix): `outputTokens: 0` here is a cost FLOOR, not a
+              // prediction — output size is unknown pre-execution.
+              // Deliberately still not inventing an output:input ratio to
+              // shrink the floor: a guessed multiplier (or a same-task
+              // input-token proxy) would be an unverified directional claim
+              // — this repo has no real historical token data to confirm
+              // output is reliably larger OR smaller than input for its
+              // actual task mix, so "improving" the number without data
+              // would just trade a known-wrong floor for an unverifiably-
+              // wrong one. The actual fix for the promotion-gate risk this
+              // floor creates lives at the consumer instead:
+              // router-parallel-analyze.mjs now refuses to credit a
+              // disagreement-row estimate with cost SAVINGS it can't verify
+              // (see that file) — the floor can stay honest about what it
+              // is here, because the one place that matters can no longer
+              // be fooled by it.
+              const inputTokens = tok.countTokens(task);
+              const banditExec = resolveExecutionProvider(banditOnly.model);
+              const pickedExec = resolveExecutionProvider(picked.model);
+              const banditPriceId = banditExec.openrouterModel ?? banditOnly.model;
+              const pickedPriceId = pickedExec.openrouterModel ?? picked.model;
+              mod.recordPair({
+                task,
+                bandit: {
+                  pick: banditOnly.model,
+                  predictedQuality: banditOnly.confidence,
+                  predictedCostUsd: prices.costUsd(banditPriceId, inputTokens, 0),
+                  backend: 'thompson-bandit',
+                },
+                ser: {
+                  pick: picked.model,
+                  predictedQuality: picked.confidence,
+                  predictedCostUsd: prices.costUsd(pickedPriceId, inputTokens, 0),
+                  backend: neuralPrior ? 'metaharness-router-hybrid' : 'bandit-only',
+                },
+              });
+            } catch {
+              // ADR-150 rule #3 — never throw from the routing path.
+            }
+          },
+        ).catch(() => { /* graceful degradation */ });
       }
 
       var pickedForResult = picked;  // eslint-disable-line no-var

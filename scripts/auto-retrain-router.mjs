@@ -38,7 +38,7 @@ import * as mh from '@metaharness/router';
 import { pairTrajectoryRows } from '../v3/@claude-flow/cli/dist/src/ruvector/router-trajectory.js';
 import { IsotonicCalibrator } from '../v3/@claude-flow/cli/dist/src/ruvector/router-calibrator.js';
 // iter 35 — single source of truth for prices.
-import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
+import { priceKnownCandidates } from './train-price-guard.mjs';
 
 const ARGS = (() => {
   const a = {
@@ -77,8 +77,7 @@ function emit(report) {
 
 function trainKrr(rows, label) {
   if (rows.length < 3) return { ok: false, reason: `${label}: only ${rows.length} rows (KRR needs ≥3 for LOO-CV)` };
-  const corpusModels = Object.keys(rows[0].scores);
-  const prices = Object.fromEntries(corpusModels.map(m => [m, blendedPrice(m)]));
+  const prices = priceKnownCandidates(rows, label);
   const t0 = performance.now();
   const { router, lambda, looQuality } = mh.trainRouter(rows, prices, {
     qualityBar: QUALITY_BAR,
@@ -191,8 +190,8 @@ if (passesGate && !ARGS.dryRun) {
   // stale and over- or under-correct. Refit unified + per-tier in one pass.
   if (!ARGS.skipCalibrator) {
     try {
-      const corpusModels = Object.keys(unionRows[0].scores);
-      const prices = Object.fromEntries(corpusModels.map(m => [m, blendedPrice(m)]));
+      const prices = priceKnownCandidates(unionRows, 'calibrate');
+      const corpusModels = Object.keys(prices); // post-filter — must match what's left in unionRows' scores
       // LOO-CV against the union → collect (pred, obs, tier) pairs.
       const t1 = performance.now();
       const allPairs = [];
