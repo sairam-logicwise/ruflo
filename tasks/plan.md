@@ -1091,19 +1091,88 @@ wrong-state task, writing `done`/`blocked` correctly, clearing stale
 **Why this matters:** This is the one genuinely good QA component already in the fork — it runs the test command, refuses to act if already green, spawns a budget-capped headless fixer, re-runs, and gates on exit code. Wrapping rather than rewriting saves a week. Bounding the retries is the important addition: without a limit, a task that cannot be fixed will consume budget indefinitely with nobody watching.
 
 **Acceptance criteria:**
-- [ ] A red task triggers repair automatically within the workflow
-- [ ] Retry count is bounded and configurable
-- [ ] The same failure twice in a row stops rather than trying a third time
-- [ ] Exhaustion moves the task to `Blocked` with the failing output attached
+- [x] A red task triggers repair automatically within the workflow
+- [x] Retry count is bounded and configurable
+- [x] The same failure twice in a row stops rather than trying a third time
+- [x] Exhaustion moves the task to `Blocked` with the failing output attached
 
 **Verification:**
-- [ ] Test with a deliberately broken change: repair runs, then gives up cleanly
-- [ ] Test with a trivially fixable break: repair succeeds and the task advances
-- [ ] Confirm budget cap is honoured
+- [x] Test with a deliberately broken change: repair runs, then gives up cleanly
+- [x] Test with a trivially fixable break: repair succeeds and the task advances
+- [x] Confirm budget cap is honoured
 
 **Dependencies:** T19
 **Files likely touched:** new wrapper, state machine, tests
 **Estimated scope:** M
+
+**Done 2026-09-22.** `v3/@claude-flow/cli/src/ruvector/repair-loop.ts` wraps
+`plugins/ruflo-testgen/scripts/tdd-repair/tdd-repair.mjs` (headless
+`claude -p`, test-driven repair) rather than rewriting it — matching the
+task description's own "wrapping saves a week" reasoning. tdd-repair.mjs
+already loops internally via its own `--max-attempts`, but that loop is
+opaque between rounds, so the wrapper always pins it to `--max-attempts 1`
+per spawn and owns the outer loop itself. That is what makes the repeated-
+failure short-circuit possible: each round's result (hashed) is compared
+against the previous round's before paying for another — two identical
+failures in a row stop the loop before a third attempt, exactly the
+acceptance criterion's wording. A second independent stop condition is
+cumulative cost reaching the configured budget. Exhaustion (either reason,
+or plain `--max-attempts` reached) writes the task back to `blocked` with
+the stop reason and the last failing output folded into `blocked.reason`
+— a diagnosable trail, not a dead end.
+
+New CLI command `ruflo record task repair <id>`, alongside T19's `task
+verify` under `record task`. It refuses anything but a task T19 itself
+blocked with `blocked.fromState === "verifying"` — a task blocked for
+a different precondition (e.g. T18's "no done criteria declared") has no
+failing test to hand a repair agent, and repairing it would be a category
+error. `--confirm` is required to actually spend anything, mirroring
+tdd-repair.mjs's own gate — without it, the command reports the repair
+plan (attempts, budget, model, resolved test command) and exits 0, exactly
+tdd-repair.mjs's own dry-run contract. On a claimed repair, the command
+does NOT trust tdd-repair.mjs's self-report: it re-verifies with T19's own
+`verifyTask` (the same trusted, exit-code-only runner `task verify` uses)
+before writing `done` — "derived, not asserted" (T19's own principle)
+applies here too, a claimed fix is not evidence until re-checked.
+
+Refactor while touching this a second time: the "write a TransitionResult
+back to a task record" block (T19's `task-verify.ts` had it inline) is now
+`applyTaskTransition()` in `records-io.ts`, shared by both `task-verify.ts`
+and the new `task-repair.ts` rather than duplicated a second time.
+
+**Verified for real, at $0, without spending anything on a live `claude -p`
+call** — this session has no explicit authorization to spend money testing
+T20 itself (distinct from T8's already-authorized budget, a different
+pipeline). Two layers of verification, both real:
+1. 20 new tests (`repair-loop.test.ts`, `task-repair.test.ts`) mock
+   `node:child_process`'s `spawnSync` completely, the same pattern T19's
+   `test-runner.test.ts` uses — proves the wrapper's own bounding/repeat/
+   budget logic against every real edge case (repaired first round,
+   repeated failure stopping at round 2 of 5, differing failures running
+   all the way to `max-attempts-exhausted`, budget reached before
+   `max-attempts`, unparseable output, `claude-cli-not-installed`,
+   tdd-repair's own exit-2 config errors) without ever touching a real
+   process.
+2. A real end-to-end smoke test against the actual compiled CLI binary
+   (`node bin/cli.js record task repair TASK-001`) in a scratch repo,
+   exercising the REAL `tdd-repair.mjs` script and the real path-resolution
+   walk from the compiled `dist/` location — twice: once via the dry-run
+   default (no `--confirm`, nothing spawned), and once with `--confirm`
+   but `--command "exit 0"` (the test already passes), which makes
+   tdd-repair.mjs's OWN pre-flight check refuse before it ever reaches the
+   `claude -p` spawn (exit 2, "test-already-passes") — a real, unmocked
+   run of the actual wrapped script, guaranteed $0 by construction, not by
+   trust. Confirmed the resulting record still validates and `record task
+   repair` correctly refuses a task that isn't blocked from "verifying".
+   The genuine-repair-success path (a real red test, a real `claude -p`
+   fix) remains unverified against the live script — that needs the same
+   explicit spend authorization T8 needed, not yet given for this pipeline.
+
+Full regression: 124 docops + 85 CLI tests (the files this task's changes
+touch) green. `npx tsc` clean for both packages, same pre-existing 4-error
+`@claude-flow/swarm`-sibling `TS6305` caveat as every prior task this
+session (confirmed unrelated: reproduces identically with T20's changes
+stashed out).
 
 ---
 

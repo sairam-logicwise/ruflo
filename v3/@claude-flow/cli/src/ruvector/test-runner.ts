@@ -47,7 +47,8 @@ export interface RunTestsOptions {
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // a real test suite can genuinely take a while
 const OUTPUT_TAIL_CHARS = 20_000;
 
-function resolveTestCommand(cwd: string, override?: string): string {
+/** Exported for T20's repair-loop wiring — tdd-repair.mjs needs the resolved command up front, not just runTests()'s own internal use of it. */
+export function resolveTestCommand(cwd: string, override?: string): string {
   if (override) return override;
   const pkgPath = join(cwd, 'package.json');
   if (existsSync(pkgPath)) {

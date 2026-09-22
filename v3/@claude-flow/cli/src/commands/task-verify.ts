@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, type Task } from '@claude-flow/docops';
-import { kindDir, findRecordPath, formatValidationError } from './records-io.js';
+import { kindDir, findRecordPath, formatValidationError, applyTaskTransition } from './records-io.js';
 import { verifyTask } from '../ruvector/test-runner.js';
 
 const taskVerifyCommand: Command = {
@@ -82,15 +82,7 @@ const taskVerifyCommand: Command = {
       output.printInfo(`${testRun.command} — exit ${testRun.exitCode}, ${(testRun.durationMs / 1000).toFixed(1)}s${coverageNote}`);
     }
 
-    const now = new Date().toISOString();
-    const newFrontmatter: Record<string, unknown> = { ...frontmatter, updatedAt: now };
-    if (transition.ok) {
-      newFrontmatter.status = transition.to;
-      delete newFrontmatter.blocked; // clear any prior blocked info now that it passed
-    } else {
-      newFrontmatter.status = 'blocked';
-      newFrontmatter.blocked = transition.blocked;
-    }
+    const newFrontmatter = applyTaskTransition(frontmatter, transition);
 
     const validatedNew = validateRecord(newFrontmatter, body);
     if (!validatedNew.success) {

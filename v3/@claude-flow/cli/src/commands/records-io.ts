@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import type { RecordKind } from '@claude-flow/docops';
+import type { RecordKind, TransitionResult } from '@claude-flow/docops';
 
 const KIND_DIR: Record<RecordKind, string> = {
   requirement: 'requirements',
@@ -123,6 +123,29 @@ export function formatValidationError(error: Error): string {
       .join('; ');
   }
   return error.message;
+}
+
+/**
+ * Turns a state-machine `TransitionResult` into the frontmatter patch that
+ * should be written back to a task record — T19's `task-verify.ts` and
+ * T20's `task-repair.ts` both end in exactly this write, so it lives here
+ * once rather than twice. Clears any prior `blocked` on success (a fresh
+ * pass supersedes an old diagnosis); on failure, `blocked` IS the new
+ * diagnosis, replacing whatever was there before.
+ */
+export function applyTaskTransition(
+  frontmatter: Record<string, unknown>,
+  transition: TransitionResult,
+): Record<string, unknown> {
+  const newFrontmatter: Record<string, unknown> = { ...frontmatter, updatedAt: new Date().toISOString() };
+  if (transition.ok) {
+    newFrontmatter.status = transition.to;
+    delete newFrontmatter.blocked;
+  } else {
+    newFrontmatter.status = 'blocked';
+    newFrontmatter.blocked = transition.blocked;
+  }
+  return newFrontmatter;
 }
 
 /**

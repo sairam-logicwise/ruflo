@@ -44,6 +44,7 @@ import {
 } from './records-io.js';
 import decomposeCommand from './decompose.js';
 import taskVerifyCommand from './task-verify.js';
+import taskRepairCommand from './task-repair.js';
 
 // ---------------------------------------------------------------------------
 // Requirement
@@ -307,7 +308,7 @@ const taskListCommand: Command = {
 const recordTaskCommand: Command = {
   name: 'task',
   description: 'Task records — the "what work" (T3/T4, agentic SDLC plan). Not to be confused with `ruflo task`, the swarm/agent runtime task command.',
-  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskVerifyCommand],
+  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskVerifyCommand, taskRepairCommand],
   action: taskListCommand.action,
 };
 
