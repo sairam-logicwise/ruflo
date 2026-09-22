@@ -566,18 +566,76 @@ row count then.
 
 **Why this matters:** The trajectory corpus is from a different domain. Without pilot-domain examples the first quotes will be wide in a way that looks like the tool is broken rather than honest. Twenty labelled examples is roughly the point at which nearest-neighbour starts producing defensible ranges. This is also the only task in the plan that deliberately spends tokens to create an asset.
 
-**Budget (D5):** 50 US dollars for the whole set, roughly 2 to 3 dollars per task. If we finish under 25 dollars, add more tasks rather than stopping early.
+**Budget (D5):** ~~50 US dollars~~ **revised to 30 US dollars** (user-approved 2026-09-22). The original "roughly 2-3 dollars per task" estimate assumed something closer to a full multi-turn agentic session; this CLI's actual dispatch primitive (`callAnthropicMessages`, what `agent_execute` and T6's decompose command both use — there is no multi-turn tool-use loop in this codebase today) is a single completion call per task, which is dramatically cheaper. Worst-case pricing (every task maxed out on both real input tokens and its full output-token ceiling) for the real 16-task list below totals **under $1**, not $30-60 — see the implementation note.
 
 **Acceptance criteria:**
 - [ ] At least 15 tasks spanning small/medium/large and different work types
 - [ ] Each has recorded actual input and output tokens and cost
 - [ ] Each is stored as a task record with actuals populated
-- [ ] Total spend stays within the 50 dollar limit, and the actual spend is reported
+- [ ] Total spend stays within the 30 dollar limit, and the actual spend is reported
 
 **Verification:**
 - [ ] Records validate
 - [ ] Spread check: no single work type is more than half the set
 - [ ] Manual review of whether the set looks representative
+
+**Pipeline built and fully verified 2026-09-22; the real pilot run itself has NOT executed.**
+This session has no LLM provider credentials configured
+(`ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OLLAMA_API_KEY` all unset) —
+confirmed directly, not assumed; T6's earlier live-call smoke test hit the
+same "No LLM provider configured" refusal. Spending real money requires
+credentials this session does not have, so at the user's explicit choice
+("prepare everything, run it later") the full pipeline is built and
+verified at $0, ready to execute the moment credentials exist:
+
+- `scripts/run-calibration-pilot.mjs` — 16 real, hand-curated pilot tasks
+  against genuine gaps in this actual codebase (drawn largely from
+  review-2026-09-21.md's and review-2026-09-22.md's own Suggestions/
+  still-open lists — schema composability, a zero-padding id bug, a YAML
+  size cap, missing config fields, a missing README, and more), spanning
+  7 work types (bug-fix ×4, refactor ×3, config ×3, docs ×2,
+  test-writing ×2, feature ×1, performance ×1 — max type is 4/16, well
+  under the half-the-set ceiling) and all three sizes, routed to
+  haiku/sonnet/opus by size tier.
+- Dry-run by default (prints what would be dispatched and a worst-case
+  cost bound per task, calls nothing) — `--yes` runs for real, `--budget`
+  overrides the 30-dollar default. Refuses cleanly with no credentials
+  configured rather than silently doing nothing (verified: exit code 2,
+  clear message).
+- A hard budget cap is enforced BEFORE every call, not after: worst-case
+  cost is computed from the real prompt's actual input-token count (not a
+  guess) plus the task's `maxTokens` ceiling (a real, API-enforced upper
+  bound on output — `max_tokens` in the request), and a task that would
+  exceed the remaining budget even in that worst case is skipped, not
+  attempted and hoped. Verified the invariant holds and that skipping one
+  over-budget task doesn't stop the run — cheaper tasks after it still get
+  a chance.
+- Pricing reuses the C4-safe pattern (T6, `model-router.ts`'s
+  `resolveExecutionProvider`): price the model that actually executes
+  (the OpenRouter alt if one is in play), never the bare tier label,
+  avoiding the exact ~100x mispricing bug C4/B1 fixed.
+- Each completed task is written as a real task record via the same
+  `claimAndWriteRecord` (id-race-safe) path `req/decision/task new` and
+  T6's decompose use, `actuals: {inputTokens, outputTokens, costUsd}`
+  populated from the real API response, citing **DEC-001** — a real
+  decision record already created in this repo's own `docs/decisions/`
+  documenting this exact approach and budget.
+- 12 unit tests (`scripts/__tests__/run-calibration-pilot.test.mjs`) cover
+  the task list's own shape (count, spread, uniqueness), dry-run calling
+  nothing, real-run record writing with correct actuals, haiku pricing
+  cheaper than sonnet for the same token counts, the budget-stop invariant
+  under a realistic (not artificially fixed-size) mocked call, continuing
+  past a skipped task, refusing a spread-violating task list, tolerating
+  one failed call without losing the rest of the run, and the full
+  16-task list staying within budget even under absolute worst-case
+  pricing. All pass at $0 — no test makes a real network call.
+- Verified via real dry-runs against the real task list (not a fixture):
+  default budget, a tight `--budget 5`, and the `--yes`-with-no-credentials
+  refusal path.
+
+**Deliberately not done:** actually running it for real. That's the
+user's call — they need to add real credentials to this environment first,
+which nobody should do without deciding to.
 
 **Dependencies:** T4, T7
 **Files likely touched:** record files, `.swarm/` corpus

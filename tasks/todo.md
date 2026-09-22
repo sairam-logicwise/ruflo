@@ -1,7 +1,7 @@
 # Task List: Tool-Neutral Agentic SDLC
 
 Full detail, acceptance criteria and rationale: [plan.md](./plan.md)
-**Status:** T1-T7, T9, T12 implemented (T8 deliberately held back — see below). Review #1 ([review-2026-09-21.md](./review-2026-09-21.md)) and Review #2 ([review-2026-09-22.md](./review-2026-09-22.md)) are both **closed — all Criticals, blockers and Important items verified fixed by execution, including the one follow-up** (the B1 regression test couldn't run under vitest's `threads` pool; fixed by dropping `process.chdir()` for a subprocess-based approach, verified passing under the real CI invocation shape). T6 and T9 done 2026-09-22 (peer-session handoff, user approved T6+T9, held T8 back since it spends real money — see plan.md's Task 8). T6's automated verification is complete; one manual step (judging real decomposition output quality) is pending user authorization to spend on live LLM calls. T10/T11 remain blocked on T8.
+**Status:** T1-T7, T9, T12 implemented; T8's pipeline is built and fully verified but NOT yet run for real (see below). Review #1 ([review-2026-09-21.md](./review-2026-09-21.md)) and Review #2 ([review-2026-09-22.md](./review-2026-09-22.md)) are both **closed — all Criticals, blockers and Important items verified fixed by execution, including the one follow-up** (the B1 regression test couldn't run under vitest's `threads` pool; fixed by dropping `process.chdir()` for a subprocess-based approach, verified passing under the real CI invocation shape). T6 and T9 done 2026-09-22 (peer-session handoff, user approved T6+T9). User approved T8's budget at $30 (revised down from the plan's original $50). **This session has no LLM provider credentials configured** — `scripts/run-calibration-pilot.mjs` is built, unit-tested (12 tests, $0), and dry-run-verified against the real 16-task list, but refuses to actually spend anything without a real `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`/`OLLAMA_API_KEY` in this environment (verified: clean exit-2 refusal). Real per-call pricing math shows the full 16-task list costs under $1 even at absolute worst case — the plan's original $2-3/task assumed something closer to a full multi-turn agentic session, not this CLI's actual single-call dispatch primitive. T6's real-LLM output-quality check has the same credentials blocker. T10/T11 remain blocked on T8 actually running.
 
 Legend — scope: **S** 1-2 files · **M** 3-5 files
 
@@ -38,7 +38,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 
 - [x] **T6** Requirement decomposition agent — *M* — deps: T1, T4 (real-LLM quality pass still pending — see plan.md)
 - [x] **T7** Build training corpus from the existing trajectory log — *S* — deps: none
-- [ ] **T8** Calibration set: 15-20 labelled pilot tasks — *M* — deps: T4, T7 — budget $50 (D5)
+- [ ] **T8** Calibration set: 15-20 labelled pilot tasks — *M* — deps: T4, T7 — budget $30 (D5, revised); pipeline built + verified 2026-09-22, not yet run (no credentials in this session)
 - [x] **T9** Feature extractor for a task record — *M* — deps: T1, T3
 - [ ] **T10** Estimator v0: nearest neighbour with ranges — *M* — deps: T7, T8, T9
 - [ ] **T11** `ruflo quote` command and MCP tool — *M* — deps: T6, T10, T12
@@ -148,4 +148,4 @@ Nothing is blocked. Full reasoning in [plan.md](./plan.md#decisions).
 | D2 | No fixed retry limit, but a high total spend limit before the first overnight run | T26 |
 | D3 | First backfill area is `v3/@claude-flow/cli/src/ruvector/` | T23 |
 | D4 | Sairam turns on branch protection, on the day T17 merges | T17 |
-| D5 | Calibration set budget is 50 US dollars, about 2 to 3 dollars per task | T8 |
+| D5 | Calibration set budget — originally 50 US dollars, revised to 30 (2026-09-22); real per-call cost is far below the original 2-3 dollars/task estimate | T8 |
