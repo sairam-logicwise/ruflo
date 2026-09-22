@@ -46,6 +46,7 @@ import decomposeCommand from './decompose.js';
 import taskVerifyCommand from './task-verify.js';
 import taskRepairCommand from './task-repair.js';
 import phaseCheckCommand from './phase-check.js';
+import workflowDocsCommand from './workflow-docs.js';
 
 // ---------------------------------------------------------------------------
 // Requirement
@@ -459,7 +460,7 @@ const validateCommand: Command = {
 export const recordCommand: Command = {
   name: 'record',
   description: 'Typed record substrate — requirement, decision, task (T3/T4, agentic SDLC plan)',
-  subcommands: [reqCommand, decisionCommand, recordTaskCommand, validateCommand, phaseCheckCommand],
+  subcommands: [reqCommand, decisionCommand, recordTaskCommand, validateCommand, phaseCheckCommand, workflowDocsCommand],
   examples: [
     { command: 'ruflo record req new --title "Quote a feature before building it"', description: 'Create a requirement' },
     { command: 'ruflo record task new --title "Fix pricing bugs" --citations REQ-001 --priority p1', description: 'Create a task citing a requirement' },
