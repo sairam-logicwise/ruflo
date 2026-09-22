@@ -556,13 +556,35 @@ row count then.
 **Why this matters:** The complexity extractor already exists and is already what the router uses to pick a model tier — reusing it means our estimate and our routing decisions agree about how hard a task is, rather than disagreeing for no reason. The missing link in the fork has always been mapping that score to expected tokens; this task builds the input half of that link.
 
 **Acceptance criteria:**
-- [ ] Extractor returns a stable feature vector for a task record
-- [ ] Identical input produces identical output
-- [ ] Files-touched estimate is grounded in the Graphify graph, not guessed
+- [x] Extractor returns a stable feature vector for a task record
+- [x] Identical input produces identical output
+- [x] Files-touched estimate is grounded in the Graphify graph, not guessed
 
 **Verification:**
-- [ ] Unit tests over fixture records covering each feature
-- [ ] Determinism test: same record twice, same vector
+- [x] Unit tests over fixture records covering each feature
+- [x] Determinism test: same record twice, same vector
+
+**Done 2026-09-22.** `src/ruvector/estimator/features.ts` exports `extractFeatures(frontmatter, body, opts)`,
+returning `{ complexityScore, filesLikelyTouched, testLayers, isNewCode, citationClosureSize }`.
+Complexity reuses the exported `analyzeTaskComplexity()` (the plan's cited
+`model-router.ts:836` line number was stale — the function lives at line
+901/1540, found by grep, not assumed). Files-touched is grounded in
+`graphify-out/graph.json`: task text is reduced to name-style tokens
+(kebab/snake/camelCase-aware) and matched against code-node labels,
+requiring a file's tokens to be MOSTLY or WHOLLY present in the task text
+(all of a 1-2 token filename, a majority of a longer one) rather than any
+single substring hit. That threshold isn't cosmetic — a naive
+single-keyword substring match, tried first, pulled in 140+ files against
+this repo's real 58k-node graph for a two-sentence task description
+(verified by running it for real); the token-overlap version returns 15
+ranked, genuinely plausible files for the same input, including the actual
+target file. No graph on disk degrades to an empty (not fabricated) match
+list, matching this repo's established convention. citation-closure walks
+citations/dependsOn/supersedes/related transitively across the local
+`docs/` tree, cycle-safe. 13 unit tests (`__tests__/ruvector/estimator/features.test.ts`)
+cover each feature independently, the token-overlap threshold specifically
+(including the exact false-positive case found via manual testing), the
+15-file cap, and determinism (same record + repo state twice → `toEqual`).
 
 **Dependencies:** T1, T3
 **Files likely touched:** `v3/@claude-flow/cli/src/ruvector/estimator/features.ts`, tests

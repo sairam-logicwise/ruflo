@@ -39,7 +39,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 - [ ] **T6** Requirement decomposition agent — *M* — deps: T1, T4
 - [x] **T7** Build training corpus from the existing trajectory log — *S* — deps: none
 - [ ] **T8** Calibration set: 15-20 labelled pilot tasks — *M* — deps: T4, T7 — budget $50 (D5)
-- [ ] **T9** Feature extractor for a task record — *M* — deps: T1, T3
+- [x] **T9** Feature extractor for a task record — *M* — deps: T1, T3
 - [ ] **T10** Estimator v0: nearest neighbour with ranges — *M* — deps: T7, T8, T9
 - [ ] **T11** `ruflo quote` command and MCP tool — *M* — deps: T6, T10, T12
 - [x] **T12** Fix inherited pricing and token-counting bugs — *M* — deps: none
