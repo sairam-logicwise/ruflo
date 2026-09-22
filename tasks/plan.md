@@ -1068,15 +1068,72 @@ citing requirement) valid.
 **Why this matters:** The point of requirement 4 is review speed. If a reviewer has to decode the AI's prose, the workflow has moved the bottleneck rather than removed it. Placing the check inside validation rather than in a prompt is the only way it holds across tools — the same reasoning as AD-1. Scope discipline matters: applying this to code comments and commit messages would make it annoying for no benefit, which is the main way this requirement fails.
 
 **Acceptance criteria:**
-- [ ] Checks sentence length, active voice, one instruction per sentence, undefined jargon, hedging words
-- [ ] Applies to record summaries and reports only, not code comments or commit messages
-- [ ] Failing readability blocks the record transition
-- [ ] Strict mode is opt-in per record
+- [x] Checks sentence length, active voice, one instruction per sentence, undefined jargon, hedging words
+- [x] Applies to record summaries and reports only, not code comments or commit messages
+- [x] Failing readability blocks the record transition
+- [x] Strict mode is opt-in per record
 
 **Verification:**
-- [ ] Unit tests for each rule, pass and fail cases
-- [ ] Manual: write a deliberately dense summary, confirm rejection with a useful message
-- [ ] Confirm a normal code commit is unaffected
+- [x] Unit tests for each rule, pass and fail cases
+- [x] Manual: write a deliberately dense summary, confirm rejection with a useful message
+- [x] Confirm a normal code commit is unaffected
+
+**Done 2026-09-22.** `docops/src/validators/readability.ts` implements
+five checks over sentence-split body text: sentence length (>25 words),
+active voice (a lightweight `be` + past-participle heuristic — documented
+as exactly that, not a claim of real POS tagging), one instruction per
+sentence (an "and then"/"; then" joiner heuristic), hedging words, and —
+strict mode only — a small representative sample of ASD-STE100
+"not-approved → approved" substitutions (NOT the real ~65,000-word
+standard dictionary, far out of scope; documented as a sample). Default
+mode runs the first four (structural); strict mode adds the fifth
+(controlled vocabulary), matching the description's own split. New
+`readabilityStrict: boolean` field on `BaseRecordShape`, opt-in per
+record, default `false`.
+
+Wired into `validateRecord` — whenever `body` is supplied (same guard as
+content-hash drift detection), so it runs both at `record validate` time
+AND at record creation. That second part needed a real ripple: `records.ts`'s
+three `new` commands and `decompose.ts`'s task-writer previously called
+`validateRecord(frontmatter)` with no body (a deliberate content-hash
+no-op at creation time), which meant readability was never actually
+checked when a record was FIRST created — the acceptance criterion's own
+manual-verification bullet ("write a deliberately dense summary, confirm
+rejection") requires it to fire right there. Updated all four call sites
+to pass `body`.
+
+**Scope decision:** "blocks the record transition" is satisfied at the
+validation layer that already exists and gates creation/`record validate`
+— not wired into T15's state-machine transitions, which plan.md's own
+Task 21 file list doesn't mention touching and which operate at a
+different layer (workflow state, not record content well-formedness).
+"Not code comments or commit messages" is true by construction, not by
+extra logic: docops only ever validates record bodies — it has no code
+path that ever reads a source file or a commit message.
+
+Caught a real bug via live testing, not by any unit test: `records.ts`'s
+`formatValidationError` duck-types a ZodError by checking for an `issues`
+array — but the new `ReadabilityError` also carries an `issues` array (its
+own shape, `{rule, sentence, message}`, no `path`), so the old check
+matched it too and crashed on `path.join(...)` with `path` undefined.
+Fixed by also requiring each issue to actually have a `path` array before
+treating it as Zod-shaped. Also found and fixed a genuine, pre-existing
+problem the new gate surfaced: this repo's own real DEC-001 record (T8's
+prep-work decision, written in this session's normal dense/technical
+style) failed the new check — rewritten into short, active,
+un-hedged sentences and rehashed via `validate --fix`; the whole repo
+validates clean again.
+
+19 new docops unit tests (5 per structural rule plus jargon/strict-mode
+cases, a deliberately-dense multi-issue paragraph, and a normal
+well-written body passing cleanly) plus 5 wiring tests in
+`frontmatter.test.ts` (rejection with a useful message, acceptance,
+strict-mode gating, the creation-time no-op when body is omitted, and the
+real `validateRecordFile` path). 4 new CLI tests
+(`records-io.test.ts`) pin the `formatValidationError` fix specifically.
+Verified end-to-end via the real compiled CLI: a dense, hedging,
+passive-voice, multi-instruction body was rejected with the exact
+per-issue message; a normal well-written one was accepted.
 
 **Dependencies:** T3
 **Files likely touched:** `v3/@claude-flow/docops/src/validators/readability.ts`, tests

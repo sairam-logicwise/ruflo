@@ -10,6 +10,7 @@ import {
   validateRecordFile,
   UnknownRecordKindError,
   ContentHashMismatchError,
+  ReadabilityError,
 } from '../src/frontmatter.js';
 import { computeContentHash } from '../src/content-hash.js';
 
@@ -280,5 +281,79 @@ describe('content-hash drift detection (Important 4, review-2026-09-21.md)', () 
     if (!result.success) {
       expect(result.error).toBeInstanceOf(ContentHashMismatchError);
     }
+  });
+});
+
+describe('readability gate (T21, agentic SDLC plan)', () => {
+  it('validateRecord rejects a record whose body fails the readability check, with a useful message', () => {
+    const body = 'This might possibly be updated prior to the release and then merged once it is reviewed by someone.';
+    const result = validateRecord(
+      {
+        id: 'REQ-003', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+        citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+      },
+      body,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(ReadabilityError);
+      expect(result.error.message.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('validateRecord accepts a well-written body', () => {
+    const body = 'This change fixes the pricing bug. It affects only the OpenRouter path.';
+    const result = validateRecord(
+      {
+        id: 'REQ-004', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+        citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+      },
+      body,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('jargon only fails validation when readabilityStrict is true on the record', () => {
+    const body = 'Utilize the existing pipeline for this.';
+    const base = {
+      id: 'REQ-005', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+    };
+    expect(validateRecord({ ...base, readabilityStrict: false }, body).success).toBe(true);
+    const strict = validateRecord({ ...base, readabilityStrict: true }, body);
+    expect(strict.success).toBe(false);
+    if (!strict.success) expect(strict.error).toBeInstanceOf(ReadabilityError);
+  });
+
+  it('readability is not checked when body is omitted (creation-time frontmatter-only check)', () => {
+    const body = 'This might possibly need review prior to merging.';
+    const result = validateRecord({
+      id: 'REQ-006', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validateRecordFile (the real end-to-end path) rejects a genuinely bad summary', () => {
+    const body = 'The configuration might possibly need updating by the maintainer prior to release and then be merged once approved.';
+    const raw = recordFile(
+      [
+        'id: DEC-002',
+        'title: A decision with bad prose',
+        'status: draft',
+        `createdAt: ${now}`,
+        `updatedAt: ${now}`,
+        'citations: []',
+        `contentHash: ${computeContentHash(body)}`,
+        'provenance: human',
+        'supersedes: []',
+        'related: []',
+        '',
+      ].join('\n'),
+      body,
+    );
+    const result = validateRecordFile(raw);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toBeInstanceOf(ReadabilityError);
   });
 });

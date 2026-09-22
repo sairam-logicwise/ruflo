@@ -50,10 +50,19 @@ export {
   validateRecordFile,
   UnknownRecordKindError,
   ContentHashMismatchError,
+  ReadabilityError,
   type AnyRecord,
   type ParsedRecordFile,
   type ValidateResult,
 } from './frontmatter.js';
+
+export {
+  validateReadability,
+  type ReadabilityRule,
+  type ReadabilityIssue,
+  type ReadabilityResult,
+  type ReadabilityOptions,
+} from './validators/readability.js';
 
 export {
   TASK_STATES,

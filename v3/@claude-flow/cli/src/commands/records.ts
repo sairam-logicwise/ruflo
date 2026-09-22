@@ -83,7 +83,7 @@ const reqNewCommand: Command = {
         provenance: (ctx.flags.provenance as string) ?? 'human',
         supersedes: splitList(ctx.flags.supersedes),
       };
-      const result = validateRecord(frontmatter);
+      const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
     });
@@ -166,7 +166,7 @@ const decisionNewCommand: Command = {
         supersedes: splitList(ctx.flags.supersedes),
         related: splitList(ctx.flags.related),
       };
-      const result = validateRecord(frontmatter);
+      const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
     });
@@ -263,7 +263,7 @@ const taskNewCommand: Command = {
         contentHash: computeContentHash(body),
         provenance: (ctx.flags.provenance as string) ?? 'human',
       };
-      const result = validateRecord(frontmatter);
+      const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
     });

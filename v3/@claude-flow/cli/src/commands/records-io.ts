@@ -108,9 +108,19 @@ export function splitList(value: unknown): string[] {
 
 /** Duck-typed: works for a ZodError without importing zod's type into this package. */
 export function formatValidationError(error: Error): string {
-  const issues = (error as { issues?: Array<{ path: Array<string | number>; message: string }> }).issues;
-  if (Array.isArray(issues)) {
-    return issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+  // Duck-typed to ZodError's shape specifically — a real bug found by
+  // running the real compiled CLI, not by any unit test: docops's
+  // ReadabilityError (T21) ALSO carries an `issues` array (its own shape:
+  // {rule, sentence, message}, no `path`), so the old check
+  // (`Array.isArray(issues)` alone) matched it too and then crashed on
+  // `i.path.join(...)` with `path` undefined. Checking that each issue
+  // actually HAS a `path` array is what makes this genuinely Zod-shaped,
+  // not just "an array called issues".
+  const issues = (error as { issues?: unknown }).issues;
+  if (Array.isArray(issues) && issues.every((i) => i && Array.isArray((i as { path?: unknown }).path))) {
+    return (issues as Array<{ path: Array<string | number>; message: string }>)
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
   }
   return error.message;
 }

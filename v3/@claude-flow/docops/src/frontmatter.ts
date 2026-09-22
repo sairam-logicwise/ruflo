@@ -29,6 +29,7 @@ import type { Requirement } from './schemas/requirement.js';
 import type { Decision } from './schemas/decision.js';
 import type { Task } from './schemas/task.js';
 import { computeContentHash } from './content-hash.js';
+import { validateReadability, type ReadabilityIssue } from './validators/readability.js';
 
 export type AnyRecord = Requirement | Decision | Task;
 
@@ -121,6 +122,18 @@ export class ContentHashMismatchError extends Error {
   }
 }
 
+/**
+ * T21: the record's body failed the ASD-STE100-style readability check.
+ * Carries every issue found, not just the first, so a caller can report
+ * (or fix) them all at once instead of a slow one-at-a-time loop.
+ */
+export class ReadabilityError extends Error {
+  constructor(public readonly issues: ReadabilityIssue[]) {
+    super(`readability check failed: ${issues.map((i) => `[${i.rule}] ${i.message}`).join('; ')}`);
+    this.name = 'ReadabilityError';
+  }
+}
+
 export type ValidateResult =
   | { success: true; record: AnyRecord }
   | { success: false; error: Error };
@@ -149,6 +162,14 @@ export function validateRecord(frontmatter: Record<string, unknown>, body?: stri
     const actualHash = computeContentHash(body);
     if (frontmatter.contentHash !== actualHash) {
       return { success: false, error: new ContentHashMismatchError(String(frontmatter.contentHash), actualHash) };
+    }
+
+    // T21: "summaries and reports" — a record's body is exactly that, and
+    // this is the only kind of text validateRecord ever sees. Code and
+    // commit messages never reach this function.
+    const readability = validateReadability(body, { strict: frontmatter.readabilityStrict === true });
+    if (!readability.ok) {
+      return { success: false, error: new ReadabilityError(readability.issues) };
     }
   }
 

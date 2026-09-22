@@ -174,7 +174,7 @@ function writeProposalsAsTasks(
         contentHash: computeContentHash(body),
         provenance: 'agent-inferred',
       };
-      const result = validateRecord(frontmatter);
+      const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
     });

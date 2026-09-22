@@ -5,34 +5,18 @@ status: draft
 createdAt: 2026-09-22T11:35:56.046Z
 updatedAt: 2026-09-22T11:35:56.046Z
 citations: []
-contentHash: 9a09331edf0f0f0fde2fa85065423042cd90d22e92bb0bb834d6fe951c45c2e4
+contentHash: 3a0e8a429b98e593827714bcbaa8a0da3a664b80139da5915f4257e88d58629a
 provenance: human
 supersedes: []
 related: []
 ---
 
-T8 (agentic SDLC plan, tasks/plan.md) needs 15-20 real pilot tasks, each
-dispatched as a single call through `callAnthropicMessages` (the same
-primitive `agent_execute` and T6's decompose command already use — this
-CLI has no multi-turn tool-use dispatch path today, so a single completion
-call is the actual unit of cost this system will predict against in
-production, not a mismatch with reality).
+T8 (agentic SDLC plan) needs 15-20 real pilot tasks. Each task runs as one call through callAnthropicMessages. Agent_execute and T6's decompose command use the same call. This CLI has no multi-turn tool loop today. So one completion call is the real unit of cost this system predicts in production.
 
-Each pilot task's real `{inputTokens, outputTokens, costUsd}` is recorded
-into a task record's `actuals` field, citing this decision. Together they
-become the calibration corpus T10's nearest-neighbour estimator draws on.
+Each pilot task records its real inputTokens, outputTokens, and costUsd. These values go into a task record's actuals field. Each task cites this decision. Together they form the calibration corpus. T10's nearest-neighbour estimator will use this corpus.
 
-Budget: 30 US dollars for the whole set (user-approved 2026-09-22, revising
-the plan's original 50-dollar ceiling down). The pilot task set spans
-different work types (bug-fix, feature, refactor, docs, test-writing,
-performance, config) and sizes (small/medium/large), routed to
-haiku/sonnet/opus accordingly, so the corpus isn't skewed toward one kind
-of work.
+The budget is 30 US dollars for the whole set. The user approved this budget on 2026-09-22. This revises the plan's original 50-dollar ceiling down.
 
-This session has no LLM provider credentials configured
-(ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OLLAMA_API_KEY all unset), so the
-pilot run itself has not executed yet. `scripts/run-calibration-pilot.mjs`
-implements the full pipeline — task list, dispatch, cost tracking with a
-hard stop at the budget, and task-record writing — verified end-to-end via
-`--dry-run` and a mocked LLM call at $0 cost, ready to run for real the
-moment credentials are available.
+The pilot task set spans different work types: bug-fix, feature, refactor, docs, test-writing, performance, and config. It spans three sizes: small, medium, and large. The system routes each task to haiku, sonnet, or opus by size. This spread avoids favoring any single work type.
+
+This session has no LLM provider credentials. ANTHROPIC_API_KEY, OPENROUTER_API_KEY, and OLLAMA_API_KEY are all unset. So the pilot run has not executed yet. The script run-calibration-pilot.mjs implements the full pipeline. It builds the task list, dispatches each call, tracks cost with a hard budget stop, and writes each task record. Tests verify this pipeline end to end through --dry-run and a mocked LLM call, at zero cost. The pipeline is ready to run for real once credentials exist.

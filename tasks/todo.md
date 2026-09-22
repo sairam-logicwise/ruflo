@@ -94,7 +94,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 
 ## Phase 6: Plain English
 
-- [ ] **T21** ASD-STE100 validator in record validation — *M* — deps: T3
+- [x] **T21** ASD-STE100 validator in record validation — *M* — deps: T3
 
 ---
 

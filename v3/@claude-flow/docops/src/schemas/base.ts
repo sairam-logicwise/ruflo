@@ -61,4 +61,12 @@ export const BaseRecordShape = {
   citations: z.array(RecordIdSchema).default([]),
   contentHash: ContentHashSchema,
   provenance: ProvenanceSchema,
+  /**
+   * T21: opt-in per record, not a repo-wide switch. Default mode (false)
+   * enforces the structural ASD-STE100 rules (sentence length, active
+   * voice, one instruction per sentence, hedging words); strict mode adds
+   * the controlled-vocabulary check on top, for records meant to leave the
+   * team (plan.md Task 21's own scoping).
+   */
+  readabilityStrict: z.boolean().default(false),
 };
