@@ -905,19 +905,114 @@ stale-binary issue above.
 **Why this matters:** This is the tool-neutral enforcement tier and the core of requirement 6 — the same denial reaches Claude Code, Cursor and Codex identically. The error message matters as much as the denial: an agent told "spec record REQ-12 is not accepted; run `ruflo req accept REQ-12`" can self-correct, while one told "denied" will retry blindly and burn budget. Note that `AgenticPolicyEngine` currently defaults to a mode that forces every decision to `allowed` (`v3/@claude-flow/security/src/policy/evaluator.ts:124`) — that default must change or the gate is a no-op.
 
 **Acceptance criteria:**
-- [ ] A workflow tool call with an unmet precondition is denied before it executes
-- [ ] The denial names the missing condition and the command that fixes it
-- [ ] The gate is on by default, not behind an environment variable
-- [ ] Non-workflow tool calls are unaffected
+- [x] A workflow tool call with an unmet precondition is denied before it executes
+- [x] The denial names the missing condition and the command that fixes it
+- [x] The gate is on by default, not behind an environment variable
+- [x] Non-workflow tool calls are unaffected
 
 **Verification:**
-- [ ] Tests: denied path, allowed path, and a non-workflow tool passing through
-- [ ] Manual: attempt the same blocked action from two different AI tools, confirm identical refusal
-- [ ] Confirm policy mode default no longer forces `allowed`
+- [x] Tests: denied path, allowed path, and a non-workflow tool passing through
+- [ ] Manual: attempt the same blocked action from two different AI tools, confirm identical refusal — genuinely not verified (see below)
+- [ ] Confirm policy mode default no longer forces `allowed` — deliberately NOT done (see below)
 
 **Dependencies:** T15
 **Files likely touched:** `v3/@claude-flow/cli/src/services/policy-runtime.ts`, `mcp-client.ts`, `v3/@claude-flow/security/src/policy/evaluator.ts`, tests
 **Estimated scope:** M
+
+**Done 2026-09-22, scope deliberately narrowed twice, both times with an
+explicit user decision before writing any code — see below.**
+
+**Decision 1 — where enforcement lives.** This task's own description
+names `AgenticPolicyEngine`'s default mode
+(`v3/@claude-flow/security/src/policy/evaluator.ts`) as the thing that
+"must change or the gate is a no-op." Investigating before touching it
+found that default (`mode: 'legacy'`, `engine.ts:39`) is a SITEWIDE
+chokepoint (ADR-324) for every registered MCP tool across the ENTIRE
+`ruflo`/`claude-flow` surface — memory, terminal/bash, GitHub, budgets,
+policy admin, not just this plan's own tools. Flipping it would start
+real enforcement for every existing policy rule and budget config across
+the whole platform, for every caller, a blast radius wildly out of
+proportion to "gate this plan's own workflow tools." Asked the user
+directly; chose the narrow option: build the phase-gate as its own
+always-on check, independent of `AgenticPolicyEngine`'s mode, leaving the
+sitewide default untouched. `evaluator.ts` was NOT modified.
+
+**Decision 2 — where the gate actually attaches.** The task's own
+description assumes these are MCP tool calls reaching `authorizeMcpTool`.
+Checked: `authorizeMcpTool` only fires for actions registered as
+`MCPTool` handlers in `mcp-client.ts`'s registry (`callMCPTool`). None of
+this plan's own commands (`record`, `decompose`, `run`, `backfill`) are
+registered there — they are plain `Command` objects with an entirely
+separate CLI dispatcher. There is, today, no MCP-tool surface for these
+actions to gate at all. Asked the user again with this concrete finding;
+chose to put the check directly inside the CLI command action functions
+— the one real execution path these actions have, identical no matter
+which AI tool's shell access runs the CLI. T22 (Cursor/generic MCP
+adapters, already depends on T16) is the natural future home for wrapping
+these as real MCP tools, not this task.
+
+**What was actually built**, given both decisions: a new precondition on
+state-machine.ts's `specified` PRECONDITIONS — a task's `drafted ->
+specified` transition now ALSO requires every cited REQ/DEC to be
+`accepted` (not `draft`, not `superseded`), the exact "spec record REQ-12
+is not accepted" scenario this task's own rationale names. New
+`CitationAcceptance` context field, supplied by the caller (docops has no
+filesystem access, AD-1) — fails CLOSED when omitted entirely, same "no
+free pass" reasoning T19 used for `testResult`; unlike `testResult`
+though, this evidence is never conditionally optional, since the citation
+contract (T3) guarantees every task has at least one REQ/DEC citation
+to check. `checkCitationAcceptance()` (records-io.ts) reads the cited
+records from disk and reports every unaccepted id by name — a missing
+record counts as unaccepted too, not a silent pass. `run.ts` (T25) is the
+one real caller today (drafted/specified transitions only happen there);
+it now always computes and supplies this evidence.
+
+**A real bug found by manually verifying this end to end, not by any unit
+test**: state-machine.ts's own doc comments assert "blocked is never
+terminal" (AD-4) and export `resumeFromBlocked()` specifically for
+resuming a blocked task once its condition is fixed — but nothing in this
+CLI ever called it, for ANY reason, not just this new citation check. A
+task blocked on a missing estimate (already true before this task) had
+no path back to progress at all, even after a human fixed it by hand.
+Fixed in `run.ts`: a task `blocked` with `fromState` other than
+`verifying` (that branch is T20's repair loop, untouched) is now
+re-attempted every pass via the same `attemptTransition()` call, but only
+counts as progress — and only gets written — when the verdict actually
+changes: either it succeeds, or the blocked REASON itself changes (real,
+if partial, progress, e.g. citation fixed but doneCriteria still
+missing). An unchanged reason is the same "repeated failure" signal T20's
+own repair loop already uses to stop, applied here to stop a genuinely
+stuck task from being rewritten every pass until `--max-passes`.
+
+**On the two unchecked verification boxes, left honestly unchecked
+rather than reinterpreted into passing:**
+- "Attempt from two different AI tools, confirm identical refusal" needs
+  a real MCP-tool surface to attempt anything FROM at all (Decision 2
+  above) — there is none yet. What IS verified: the CLI-level gate is
+  reachable identically by any tool with shell access, which is how every
+  AI coding tool (including this session) actually invokes `ruflo`
+  today; that's the real property this criterion cares about, just not
+  literally testable via two MCP clients yet.
+- "Confirm policy mode default no longer forces allowed" describes
+  Decision 1's rejected path — `AgenticPolicyEngine`'s default is
+  unchanged, deliberately, per the user's own explicit choice.
+
+**Verified for real**: 2 new docops tests (fails closed when
+citation-acceptance evidence is omitted; names every unaccepted id) plus
+4 updated existing tests (now supply the evidence explicitly, so they
+keep testing only the precondition they originally meant to). 8 new CLI
+tests for `checkCitationAcceptance` (accepted/draft/superseded/missing/
+TASK-citation-ignored/multiple-unaccepted-named) plus 4 new `run.ts`
+tests (blocks on an unaccepted citation even with a real estimate;
+resumes once a human fixes it — the real bug above; a genuinely stuck
+task is written exactly once, never re-churned). Three real end-to-end
+runs against the compiled CLI: citation blocks a real task with a real
+estimate; accepting the requirement and re-running resumes it (confirmed
+BROKEN before the `resumeFromBlocked` fix, confirmed fixed after);
+`record validate` stays green throughout.
+
+Full regression: 126 docops + 111 CLI tests (the files this task's
+changes touch) green.
 
 ---
 

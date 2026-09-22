@@ -78,4 +78,5 @@ export {
   type BlockedInfo,
   type TransitionContext,
   type TransitionResult,
+  type CitationAcceptance,
 } from './state-machine.js';

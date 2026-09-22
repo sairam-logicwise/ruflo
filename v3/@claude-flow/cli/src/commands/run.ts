@@ -6,9 +6,29 @@
  * "Picks the next task whose preconditions are met" (the task's own
  * description) is `attemptTransition()` itself (T15) — calling it directly
  * for `drafted` and `specified` is safe because both preconditions are
- * real evidence checks (an `estimate`, a declared `doneCriteria`), so a
+ * real evidence checks (an `estimate`, a declared `doneCriteria`, and now
+ * T16's citation-acceptance check on the drafted -> specified step), so a
  * task that hasn't earned its transition yet is correctly reported
  * `blocked`, never silently advanced.
+ *
+ * T16 (phase gate): `drafted -> specified`'s precondition now ALSO
+ * requires every cited REQ/DEC to actually be `accepted` — computed here
+ * via `checkCitationAcceptance()` (records-io.ts) and supplied as
+ * `TransitionContext.citationAcceptance`, since state-machine.ts has no
+ * filesystem access of its own (AD-1) and fails CLOSED when this evidence
+ * is omitted. Deliberately scoped narrower than the plan's own literal
+ * wording ("extend `authorizeMcpTool`"): there is no MCP-tool surface for
+ * these record/task actions yet (`authorizeMcpTool` only gates tools
+ * registered in `mcp-client.ts`'s registry, which record/task/run/
+ * decompose never joined), and `AgenticPolicyEngine`'s own default mode
+ * is a SITEWIDE chokepoint for the entire CLI/MCP surface — flipping it
+ * would enforce every unrelated existing policy rule across the whole
+ * platform, a blast radius wildly disproportionate to "gate this plan's
+ * own workflow tools." This check lives directly in the one real
+ * execution path these actions have today (the CLI command itself),
+ * unconditionally — on by default, not behind an environment variable,
+ * per the acceptance criterion — and applies identically no matter which
+ * AI tool's shell access ran `ruflo run`.
  *
  * `implementing` is the one state this loop deliberately never touches:
  * its precondition is an intentional no-op — state-machine.ts's own words,
@@ -54,7 +74,7 @@ import { join } from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, type Task, type TransitionResult } from '@claude-flow/docops';
-import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition } from './records-io.js';
+import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance } from './records-io.js';
 import { verifyTask, resolveTestCommand } from '../ruvector/test-runner.js';
 import { runRepairLoop } from '../ruvector/repair-loop.js';
 
@@ -144,7 +164,39 @@ const runCommand: Command = {
         };
 
         if (task.status === 'drafted' || task.status === 'specified') {
-          const transition = attemptTransition(task, task.status, {});
+          const transition = attemptTransition(task, task.status, { citationAcceptance: checkCitationAcceptance(ctx, task) });
+          const err = write(transition);
+          if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
+          madeProgress = true;
+          outcomes.push(transition.ok
+            ? { id: task.id, action: 'advanced', status: transition.to }
+            : { id: task.id, action: 'advanced', status: 'blocked', detail: transition.blocked.reason });
+          continue;
+        }
+
+        // Resume a task blocked from drafted/specified (never from verifying —
+        // that's the repair branch below) once whatever a human fixed makes
+        // the SAME attemptTransition() call succeed. Found via T16's own
+        // manual verification: state-machine.ts's AD-4 promises "blocked is
+        // never terminal", but nothing in this CLI ever called
+        // resumeFromBlocked() before this — a task blocked on a missing
+        // estimate, or now an unaccepted citation, had no path back at all,
+        // for any reason, not just T16's new one. Re-attempts every pass,
+        // but only counts as progress (and only writes) when the verdict
+        // actually changes — either it succeeds, or the blocked REASON
+        // itself changes (real, if partial, progress: e.g. citation fixed,
+        // now blocked on the estimate instead). An unchanged reason is the
+        // same "repeated failure" signal T20's repair loop already uses to
+        // stop, so a genuinely stuck task is reported once and never
+        // rewritten again this run, not churned every pass until maxPasses.
+        if (task.status === 'blocked' && task.blocked && task.blocked.fromState !== 'verifying') {
+          const fromState = task.blocked.fromState;
+          const previousReason = task.blocked.reason;
+          const transition = attemptTransition(task, fromState, { citationAcceptance: checkCitationAcceptance(ctx, task) });
+          if (!transition.ok && transition.blocked.reason === previousReason) {
+            stuck.push({ id: task.id, status: task.status, reason: `${transition.blocked.reason} — needs a human` });
+            continue;
+          }
           const err = write(transition);
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;

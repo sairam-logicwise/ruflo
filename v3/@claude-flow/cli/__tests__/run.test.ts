@@ -49,8 +49,12 @@ describe('ruflo run', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  async function createTask(patch?: (raw: string) => string): Promise<{ id: string; filePath: string }> {
-    ctx.flags = { title: 'req one', _: [] };
+  async function createTask(patch?: (raw: string) => string, reqStatus: 'accepted' | 'draft' = 'accepted'): Promise<{ id: string; filePath: string }> {
+    // Defaults to an ACCEPTED citation so every test that isn't specifically
+    // about T16's citation-acceptance gate exercises only the precondition
+    // it names, same "arrange only what the test is about" reasoning as the
+    // rest of this suite.
+    ctx.flags = { title: 'req one', status: reqStatus, _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const reqId = (req?.data as { id: string }).id;
 
@@ -82,6 +86,65 @@ describe('ruflo run', () => {
     expect(written).toContain('status: blocked');
     expect(written).toContain('reason: no estimate recorded');
     expect(written).toContain('fromState: drafted');
+  });
+
+  it('T16: blocks a drafted task whose citation is not accepted, even with a real estimate', async () => {
+    const { filePath } = await createTask(
+      (raw) => raw.replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\n---\n\n'),
+      'draft',
+    );
+    ctx.args = [];
+    ctx.flags = { _: [] };
+    await runCommand.action!(ctx);
+
+    const written = readFileSync(filePath, 'utf8');
+    expect(written).toContain('status: blocked');
+    expect(written).toContain('cited record(s) not accepted: REQ-001');
+    expect(written).toContain('fromState: drafted');
+  });
+
+  it('a blocked-from-drafted task resumes once a human fixes the underlying condition (found via T16 manual verification — resumeFromBlocked had no caller at all before this)', async () => {
+    ctx.flags = { title: 'req one', status: 'draft', _: [] };
+    const req = await sub(recordCommand, 'req', 'new').action!(ctx);
+    const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
+
+    ctx.flags = { title: 'a task', citations: reqId, _: [] };
+    const task = await sub(recordCommand, 'task', 'new').action!(ctx);
+    const { path: filePath } = task?.data as { id: string; path: string };
+    writeFileSync(filePath, readFileSync(filePath, 'utf8').replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\n---\n\n'));
+
+    ctx.args = [];
+    ctx.flags = { _: [] };
+    await runCommand.action!(ctx);
+    expect(readFileSync(filePath, 'utf8')).toContain('cited record(s) not accepted');
+
+    // A human accepts the requirement between runs — no tooling change, just editing the file,
+    // exactly like every other "fix it by hand" pattern already used throughout this plan.
+    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+
+    ctx.flags = { _: [] };
+    await runCommand.action!(ctx);
+    const written = readFileSync(filePath, 'utf8');
+    // Real progress: it resumed past the citation gate into "specified", then immediately
+    // hit the NEXT real precondition (no doneCriteria, never set in this test) — a
+    // different blocked reason than before, proof the resume actually advanced the task
+    // rather than getting stuck re-reporting the original citation problem.
+    expect(written).toContain('status: blocked');
+    expect(written).toContain('reason: no done criteria declared');
+    expect(written).toContain('fromState: specified');
+    expect(written).not.toContain('not accepted');
+  });
+
+  it('a genuinely stuck blocked-from-drafted task is reported once and never rewritten again within the same run', async () => {
+    const { filePath } = await createTask(undefined, 'draft'); // no estimate either — nothing a human has fixed
+    ctx.args = [];
+    ctx.flags = { _: [] };
+    const result = await runCommand.action!(ctx);
+
+    const data = result?.data as { passes: number; outcomes: Array<{ id: string }> };
+    expect(data.passes).toBeLessThan(4); // bounded quickly, not spinning toward --max-passes
+    expect(data.outcomes.filter((o) => o.id === 'TASK-001')).toHaveLength(1); // written exactly once, not re-churned pass after pass
+    expect(readFileSync(filePath, 'utf8')).toContain('cited record(s) not accepted');
   });
 
   it('advances a task all the way to implementing across passes once estimate and doneCriteria are both present', async () => {

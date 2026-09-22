@@ -17,6 +17,7 @@ import { computeContentHash } from '../src/content-hash.js';
 
 const now = '2026-09-21T00:00:00.000Z';
 const hash = computeContentHash('body');
+const ACCEPTED = { citationAcceptance: { allAccepted: true, unacceptedIds: [] } };
 
 function task(overrides: Partial<Record<string, unknown>> = {}): Task {
   const raw = {
@@ -55,9 +56,9 @@ describe('nextState', () => {
 });
 
 describe('attemptTransition — legal forward path', () => {
-  it('drafted -> specified succeeds once an estimate is recorded', () => {
+  it('drafted -> specified succeeds once an estimate is recorded and citations are accepted', () => {
     const t = task({ estimate: { lowTokens: 100, highTokens: 500, confidence: 0.6 } });
-    const result = attemptTransition(t, 'drafted');
+    const result = attemptTransition(t, 'drafted', ACCEPTED);
     expect(result).toEqual({ ok: true, to: 'specified' });
   });
 
@@ -93,15 +94,37 @@ describe('attemptTransition — legal forward path', () => {
 });
 
 describe('attemptTransition — AD-4: a failed precondition routes to blocked, never to done, and never leaves "failed"', () => {
-  it('drafted -> specified blocks with no estimate recorded', () => {
+  it('drafted -> specified blocks with no estimate recorded, given accepted citations', () => {
     const t = task();
-    const result = attemptTransition(t, 'drafted');
+    const result = attemptTransition(t, 'drafted', ACCEPTED);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.to).toBe('blocked');
       expect(result.blocked.fromState).toBe('drafted');
       expect(result.blocked.reason).toMatch(/no estimate/);
       expect(result.blocked.unblockCondition.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('T16: drafted -> specified blocks when citation acceptance was never checked at all — fails closed, no free pass', () => {
+    const t = task({ estimate: { lowTokens: 100, highTokens: 500, confidence: 0.6 } });
+    const result = attemptTransition(t, 'drafted');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.blocked.reason).toMatch(/not checked/);
+    }
+  });
+
+  it('T16: drafted -> specified blocks and names every unaccepted cited record', () => {
+    const t = task({ estimate: { lowTokens: 100, highTokens: 500, confidence: 0.6 } });
+    const result = attemptTransition(t, 'drafted', {
+      citationAcceptance: { allAccepted: false, unacceptedIds: ['REQ-001', 'DEC-002'] },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.blocked.reason).toContain('REQ-001');
+      expect(result.blocked.reason).toContain('DEC-002');
+      expect(result.blocked.unblockCondition).toContain('REQ-001');
     }
   });
 
@@ -148,7 +171,7 @@ describe('attemptTransition — AD-4: a failed precondition routes to blocked, n
 
   it('a blocked verdict always names a fromState that resumeFromBlocked can use to get back to a real, resumable state', () => {
     const t = task();
-    const result = attemptTransition(t, 'drafted');
+    const result = attemptTransition(t, 'drafted', ACCEPTED);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       const resumed = resumeFromBlocked(result.blocked);

@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import type { RecordKind, TransitionResult } from '@claude-flow/docops';
+import { parseRecordFile, type RecordKind, type CitationAcceptance, type Task, type TransitionResult } from '@claude-flow/docops';
 
 const KIND_DIR: Record<RecordKind, string> = {
   requirement: 'requirements',
@@ -146,6 +146,29 @@ export function applyTaskTransition(
     newFrontmatter.blocked = transition.blocked;
   }
   return newFrontmatter;
+}
+
+/**
+ * T16: real evidence for state-machine.ts's `specified` precondition —
+ * docops has no filesystem access (AD-1), so THIS is where a task's
+ * REQ/DEC citations actually get read and checked against their own
+ * `status`. A citation that isn't `REQ-`/`DEC-` prefixed (i.e. another
+ * TASK-) is skipped: only requirements and decisions have an acceptance
+ * lifecycle at all. A missing file counts as unaccepted too — citing a
+ * requirement that no longer exists on disk is exactly the kind of thing
+ * this gate exists to catch, not something to silently pass through.
+ */
+export function checkCitationAcceptance(ctx: CommandContext, task: Task): CitationAcceptance {
+  const unacceptedIds: string[] = [];
+  for (const id of task.citations) {
+    const kind: RecordKind | undefined = id.startsWith('REQ-') ? 'requirement' : id.startsWith('DEC-') ? 'decision' : undefined;
+    if (!kind) continue;
+    const filePath = findRecordPath(kindDir(ctx, kind), id);
+    if (!filePath) { unacceptedIds.push(id); continue; }
+    const { frontmatter } = parseRecordFile(readFileSync(filePath, 'utf8'));
+    if (frontmatter.status !== 'accepted') unacceptedIds.push(id);
+  }
+  return { allAccepted: unacceptedIds.length === 0, unacceptedIds };
 }
 
 /**

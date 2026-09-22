@@ -46,9 +46,23 @@ export interface BlockedInfo {
   fromState: ResumableState;
 }
 
-/** Evidence a precondition can't derive from the task record alone. Supplied by the caller (T19 supplies testResult once it exists). */
+/**
+ * T16: whether the task's cited REQ/DEC records are actually `accepted` —
+ * not still `draft`, not `superseded`. Derived from OTHER records on disk,
+ * which this package deliberately has no access to (it stays storage-free
+ * — see AD-1/module doc), so the caller must read them and supply the
+ * verdict, same pattern T19 established for `testResult`.
+ */
+export interface CitationAcceptance {
+  allAccepted: boolean;
+  /** The cited ids that are NOT accepted (missing, still draft, or superseded) — named so the denial can say exactly what to fix. */
+  unacceptedIds: string[];
+}
+
+/** Evidence a precondition can't derive from the task record alone. Supplied by the caller (T19 supplies testResult once it exists; T16 supplies citationAcceptance). */
 export interface TransitionContext {
   testResult?: { passed: boolean; coverage?: number };
+  citationAcceptance?: CitationAcceptance;
 }
 
 export type TransitionResult =
@@ -71,10 +85,33 @@ const FORWARD: Record<ResumableState, TaskState> = {
  * to ENTER this state"), keyed the same way FORWARD's values are named.
  */
 const PRECONDITIONS: Record<Exclude<TaskState, 'drafted' | 'blocked'>, Precondition> = {
-  specified: (task) =>
-    task.estimate
+  // T16: fails CLOSED when citationAcceptance isn't supplied at all — same
+  // "no free pass" reasoning T19 used for testResult. A task's citations
+  // are ALWAYS present (the citation contract, T3, requires at least one),
+  // so unlike testResult this evidence is never conditionally optional —
+  // every caller attempting drafted -> specified must have actually
+  // checked. Advancing a task whose justifying REQ/DEC was never accepted
+  // is exactly the "mandatory step cannot be skipped" Requirement 6 names.
+  specified: (task, context) => {
+    if (!context.citationAcceptance) {
+      return {
+        ok: false,
+        reason: 'citation acceptance was not checked before this attempt',
+        unblockCondition: 'the caller must verify every cited requirement/decision is accepted and supply that evidence before attempting this transition',
+      };
+    }
+    if (!context.citationAcceptance.allAccepted) {
+      const ids = context.citationAcceptance.unacceptedIds.join(', ');
+      return {
+        ok: false,
+        reason: `cited record(s) not accepted: ${ids}`,
+        unblockCondition: `accept ${ids} (set its status to "accepted") before this task can be specified, or cite an already-accepted record instead`,
+      };
+    }
+    return task.estimate
       ? { ok: true }
-      : { ok: false, reason: 'no estimate recorded', unblockCondition: 'record an estimate (low/high tokens and a confidence level) on this task' },
+      : { ok: false, reason: 'no estimate recorded', unblockCondition: 'record an estimate (low/high tokens and a confidence level) on this task' };
+  },
 
   implementing: (task) =>
     task.doneCriteria
