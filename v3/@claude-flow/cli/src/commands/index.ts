@@ -111,6 +111,9 @@ const commandLoaders: Record<string, CommandLoader> = {
   // removable augmentation; no-ops to local transport when AGNTCY/SLIM is
   // not configured (RUFLO_AGNTCY_SLIM_ENDPOINT unset).
   transport: () => import('./agntcy/transport.js'),
+  // The autonomy loop (T25, agentic SDLC plan) — advances task records
+  // through T19's verify and T20's repair until a pass makes no progress.
+  run: () => import('./run.js'),
 };
 
 // Cache for loaded commands

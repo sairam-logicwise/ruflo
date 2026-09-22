@@ -1389,19 +1389,92 @@ reporting empty dependencies/entry-points/coverage rather than guessing).
 **Why this matters:** Requirement 7. Making this a loop over the state machine rather than a long-lived agent session is what makes it predictable and restartable — it survives crashes, budget limits and a closed laptop, and can resume on a different machine in a different tool. Running it as a CLI command rather than a tool-specific hook is what keeps it tool-neutral; the inherited autopilot is Claude Code-only, never installed, and returns success from its own check so it could not block anything.
 
 **Acceptance criteria:**
-- [ ] Picks and executes available transitions until none remain
-- [ ] Stops on: no available transition, repeated failure, a gate needing a human
-- [ ] Reports why it stopped and what would unblock it
-- [ ] Resumes correctly after being killed mid-run
+- [x] Picks and executes available transitions until none remain
+- [x] Stops on: no available transition, repeated failure, a gate needing a human
+- [x] Reports why it stopped and what would unblock it
+- [x] Resumes correctly after being killed mid-run
 
 **Verification:**
-- [ ] Test: runs a small task set to completion unattended
-- [ ] Test: kill mid-run and resume, confirm no duplicate or lost work
-- [ ] Test: a blocked task stops the loop with a clear reason
+- [x] Test: runs a small task set to completion unattended
+- [x] Test: kill mid-run and resume, confirm no duplicate or lost work
+- [x] Test: a blocked task stops the loop with a clear reason
 
 **Dependencies:** T19, T20
 **Files likely touched:** `v3/@claude-flow/cli/src/commands/run.ts`, tests
 **Estimated scope:** M
+
+**Done 2026-09-22.** `ruflo run` (`v3/@claude-flow/cli/src/commands/run.ts`,
+a new top-level command — checked for a name collision against
+`commands/index.ts` first, given the `verify.ts` incident earlier this
+session; no prior `run` command existed at the top level). Repeatedly
+scans every task record and calls `attemptTransition()` (T15) directly for
+`drafted` and `specified` — both preconditions are real evidence checks
+(an `estimate`, a declared `doneCriteria`), so this is safe: a task that
+hasn't earned its transition is correctly written `blocked`, never
+silently advanced. Confirmed this actually chains: a task with both fields
+present advances `drafted` → `specified` → `implementing` across two
+internal passes of a single `ruflo run` invocation, verified for real
+against the compiled CLI.
+
+`implementing` is the one resumable state the loop deliberately never
+touches — its precondition (`state-machine.ts`) is an intentional no-op,
+"an agent/human signals readiness to verify," not a missing-evidence gate.
+Calling `attemptTransition()` on it the same way as `drafted`/`specified`
+would have been the obvious lazy move and the wrong one: it would silently
+flip every task mid-implementation straight to `verifying` with zero real
+work done. No tool in this codebase means "implementation is actually
+finished" yet, so `implementing` is unconditionally reported as needing a
+human, by construction — a real design decision, not an oversight, called
+out with its own comment in `run.ts`.
+
+`verifying` runs T19's `verifyTask`. A task `blocked` with
+`fromState: 'verifying'` optionally runs T20's `runRepairLoop` — only with
+`--repair`, spending only with `--confirm` too — capped at ONE repair
+attempt per task per `ruflo run` invocation (an in-memory
+`Set<taskId>` for the process's lifetime, not persisted): retrying an
+already-failed repair on a later internal pass would bypass T20's own
+per-invocation budget entirely, exactly the runaway-spend scenario T20's
+own design note warns about. This is deliberately NOT the same thing as
+T26's cross-*run* spend ceiling (still unbuilt, depends on this task) —
+T25 only guards against the loop re-spending on the SAME task within a
+single invocation; a human re-running `ruflo run --repair` later is an
+explicit, separate decision.
+
+"Resumes correctly after being killed mid-run" needed no extra state
+machinery: every task file is read fresh from disk at the top of each
+pass and written at most once per pass — there is no separate loop-state
+file that could fall out of sync with the records, so re-invoking
+`ruflo run` after a kill always continues from whatever the records
+actually say. The loop's own termination is likewise a structural
+guarantee, not a heuristic: each task can only move through
+`drafted → (blocked-from-drafted | specified) → (blocked-from-specified |
+implementing) → (needs a human, permanently)` on the forward side, or
+`verifying → (done | blocked-from-verifying, at most one repair attempt)`
+on the test side — no path revisits a state this loop already acted on,
+so a pass that changes nothing is the correctly-guaranteed exit, not
+merely the likely one. `--max-passes` (default 50) is a redundant defensive
+cap, not load-bearing for correctness; verified it actually caps progress
+early with `--max-passes 1`.
+
+**Verified for real, at $0**, same discipline as T20: 10 new tests
+(`run.test.ts`) mock `node:child_process` transitively via mocked
+`verifyTask`/`runRepairLoop` (never a real process spawn), covering every
+branch above — including the "repair attempted once per run" guard,
+proven by asserting `runRepairLoop` is called exactly once across multiple
+internal passes even though the task remains `blocked`-from-`verifying`
+after a failed repair. Plus a full real end-to-end run against the
+compiled CLI binary in a scratch repo: `ruflo run --help`; a fresh drafted
+task with no estimate correctly blocking; a task with both fields present
+genuinely advancing to `implementing` over real internal passes; a
+genuine `verifying → done` transition; and `ruflo run --repair --confirm`
+against the REAL `tdd-repair.mjs` script with `--command "exit 0"`, so
+its own pre-flight refuses before ever reaching the billed `claude -p`
+spawn — guaranteed $0 by construction, identical technique to T20's own
+smoke test, and confirming the real repair-loop wiring end to end without
+spending anything.
+
+Full regression: 124 docops + 95 CLI tests (the files this task's changes
+touch) green.
 
 ---
 
