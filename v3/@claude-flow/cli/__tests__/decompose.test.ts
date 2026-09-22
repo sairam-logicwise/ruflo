@@ -1,6 +1,7 @@
 /**
  * T6 (agentic SDLC plan) — requirement decomposition: prompt building,
  * response parsing, graph-grounding, and the `ruflo record req decompose` CLI.
+ * Also T18 — inferring a sensible default doneCriteria per proposal.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -12,6 +13,7 @@ import {
   buildDecomposePrompt,
   parseProposals,
   groundProposals,
+  inferDoneCriteria,
   MIN_TASKS,
   MAX_TASKS,
   type TaskProposal,
@@ -105,6 +107,40 @@ describe('parseProposals', () => {
     const result = parseProposals(JSON.stringify(arr));
     expect('proposals' in result).toBe(true);
     if ('proposals' in result) expect(result.proposals[0].files).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('leaves doneCriteria unset when the item does not specify one (to be inferred later)', () => {
+    const result = parseProposals(JSON.stringify(validArray(MIN_TASKS)));
+    expect('proposals' in result).toBe(true);
+    if ('proposals' in result) expect(result.proposals[0].doneCriteria).toBeUndefined();
+  });
+
+  it('accepts an explicit doneCriteria (T18: a human editing a dry-run before --from-file --yes)', () => {
+    const arr = validArray(MIN_TASKS);
+    (arr[0] as Record<string, unknown>).doneCriteria = { testLayers: ['unit', 'integration'], coverageThreshold: 90 };
+    const result = parseProposals(JSON.stringify(arr));
+    expect('proposals' in result).toBe(true);
+    if ('proposals' in result) {
+      expect(result.proposals[0].doneCriteria).toEqual({ testLayers: ['unit', 'integration'], coverageThreshold: 90 });
+    }
+  });
+});
+
+describe('inferDoneCriteria (T18)', () => {
+  it('reuses T9\'s test-layer detection — picks up an explicit mention in the task text', () => {
+    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.');
+    expect(dc.testLayers).toContain('integration');
+    expect(dc.testLayers).toContain('e2e');
+  });
+
+  it('returns an empty testLayers list, not a fabricated default, when nothing suggests a layer', () => {
+    const dc = inferDoneCriteria('Update the README wording', 'Fix a typo.');
+    expect(dc.testLayers).toEqual([]);
+  });
+
+  it('never sets a coverageThreshold — that is a per-task human choice, not an inferred default', () => {
+    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.');
+    expect(dc.coverageThreshold).toBeUndefined();
   });
 });
 
@@ -246,6 +282,37 @@ describe('ruflo record req decompose', () => {
         expect(raw).toContain(`citations:\n  - ${reqId}`);
         expect(raw).toContain('provenance: agent-inferred');
       }
+
+      ctx.flags = { _: [] };
+      const validated = await sub(recordCommand, 'validate').action!(ctx);
+      expect(validated?.success).toBe(true);
+    });
+
+    it('T18: infers doneCriteria for a proposal that has none, and respects one explicitly set', async () => {
+      ctx.flags = { title: 'Quote a feature', _: [] };
+      const req = await sub(recordCommand, 'req', 'new').action!(ctx);
+      const reqId = (req?.data as { id: string }).id;
+
+      const proposalsPath = join(tmp, 'proposals.json');
+      writeFileSync(proposalsPath, JSON.stringify([
+        proposal({ title: 'Add an integration test', body: 'Also needs an end-to-end check.' }), // no doneCriteria — inferred
+        proposal({ title: 'Task B', body: 'Do B.', doneCriteria: { testLayers: ['unit'], coverageThreshold: 95 } }), // explicit — respected as-is
+        proposal({ title: 'Task C', body: 'Do C.' }),
+      ]));
+
+      ctx.args = [reqId];
+      ctx.flags = { 'from-file': proposalsPath, yes: true, _: [] };
+      const result = await sub(recordCommand, 'req', 'decompose').action!(ctx);
+      const created = (result?.data as { created: Array<{ id: string; filePath: string }> }).created;
+
+      const inferred = readFileSync(created[0].filePath, 'utf8');
+      expect(inferred).toContain('integration');
+      expect(inferred).toContain('e2e');
+
+      const explicit = readFileSync(created[1].filePath, 'utf8');
+      expect(explicit).toContain('coverageThreshold: 95');
+      expect(explicit).toContain('unit');
+      expect(explicit).not.toContain('integration'); // not clobbered by inference
 
       ctx.flags = { _: [] };
       const validated = await sub(recordCommand, 'validate').action!(ctx);

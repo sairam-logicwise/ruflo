@@ -27,17 +27,46 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, computeContentHash, validateRecord, serializeRecordFile, RECORD_PREFIXES } from '@claude-flow/docops';
 import { kindDir, findRecordPath, claimAndWriteRecord, slugify, ensureDir, formatValidationError } from './records-io.js';
-import { groundInGraph } from '../ruvector/estimator/features.js';
+import { groundInGraph, extractFeatures } from '../ruvector/estimator/features.js';
 import { callAnthropicMessages, type AnthropicCallResult } from '../mcp-tools/agent-execute-core.js';
 
 export const MIN_TASKS = 3;
 export const MAX_TASKS = 15;
+
+export interface TaskProposalDoneCriteria {
+  testLayers: string[];
+  coverageThreshold?: number;
+}
 
 export interface TaskProposal {
   title: string;
   body: string;
   /** Files this task touches — must be a subset of the grounding list; anything else is dropped, not trusted. */
   files: string[];
+  /**
+   * T18: which test layers apply and (optionally) a coverage bar. Left
+   * unset by the model/--from-file, a sensible default is inferred at
+   * decomposition time (see inferDoneCriteria) — never a global default,
+   * always this specific task's own bar (plan.md Task 18's whole point).
+   * Set explicitly here (by the model, or by a human editing a dry-run's
+   * JSON before --from-file --yes) to override the inferred default.
+   */
+  doneCriteria?: TaskProposalDoneCriteria;
+}
+
+/**
+ * T18: infers a sensible default doneCriteria for a proposal that doesn't
+ * already have one — reuses T9's extractFeatures() (the same test-layer
+ * detection T10's estimator will use), so decomposition and estimation
+ * agree about what a task needs, the same reasoning T9 itself gives for
+ * reusing the router's complexity score. No default coverageThreshold —
+ * inventing one would be exactly the kind of unfounded number this repo
+ * has repeatedly avoided elsewhere; a human sets one explicitly if they
+ * want one.
+ */
+export function inferDoneCriteria(title: string, body: string, opts: { repoRoot?: string; graphPath?: string } = {}): TaskProposalDoneCriteria {
+  const features = extractFeatures({ title }, body, opts);
+  return { testLayers: features.testLayers };
 }
 
 export function buildDecomposePrompt(
@@ -90,7 +119,16 @@ export function parseProposals(raw: string): { proposals: TaskProposal[] } | { e
     if (typeof obj.title !== 'string' || !obj.title.trim()) return { error: `item ${i} is missing a non-empty title` };
     if (typeof obj.body !== 'string' || !obj.body.trim()) return { error: `item ${i} is missing a non-empty body` };
     const files = Array.isArray(obj.files) ? obj.files.filter((f): f is string => typeof f === 'string') : [];
-    proposals.push({ title: obj.title, body: obj.body, files });
+
+    let doneCriteria: TaskProposalDoneCriteria | undefined;
+    if (obj.doneCriteria && typeof obj.doneCriteria === 'object') {
+      const dc = obj.doneCriteria as Record<string, unknown>;
+      const testLayers = Array.isArray(dc.testLayers) ? dc.testLayers.filter((l): l is string => typeof l === 'string') : [];
+      const coverageThreshold = typeof dc.coverageThreshold === 'number' ? dc.coverageThreshold : undefined;
+      doneCriteria = { testLayers, ...(coverageThreshold != null ? { coverageThreshold } : {}) };
+    }
+
+    proposals.push({ title: obj.title, body: obj.body, files, ...(doneCriteria ? { doneCriteria } : {}) });
   }
   return { proposals };
 }
@@ -132,6 +170,7 @@ function writeProposalsAsTasks(
         updatedAt: now,
         citations: [requirementId],
         dependsOn: [],
+        doneCriteria: proposal.doneCriteria,
         contentHash: computeContentHash(body),
         provenance: 'agent-inferred',
       };
@@ -224,6 +263,14 @@ const decomposeCommand: Command = {
         output.printInfo(`decompose call: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out tokens`);
       }
     }
+
+    // T18: fill in a sensible default doneCriteria for any proposal that
+    // doesn't already have one (from the model, or a hand-edited
+    // --from-file) — applied uniformly regardless of source, same
+    // reasoning as grounding above.
+    proposals = proposals.map((p) =>
+      p.doneCriteria ? p : { ...p, doneCriteria: inferDoneCriteria(p.title, p.body, { repoRoot: ctx.cwd, graphPath }) },
+    );
 
     if (!ctx.flags.yes) {
       output.printInfo(`${proposals.length} task proposal(s) for ${id} — dry run, nothing written. Re-run with --yes to create them, or save this output, edit it, and pass --from-file <path> --yes.`);

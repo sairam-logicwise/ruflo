@@ -962,13 +962,42 @@ stale-binary issue above.
 **Why this matters:** A config change does not need an end-to-end test and a checkout flow does. A single global bar is either too weak to be meaningful or too heavy to be tolerated, and teams route around the second. Declaring the bar per task is also what makes the later gate objective rather than a judgement call at review time.
 
 **Acceptance criteria:**
-- [ ] Task records declare applicable test layers and thresholds
-- [ ] A sensible default is inferred at decomposition time and is editable
-- [ ] Schema validates the shape
+- [x] Task records declare applicable test layers and thresholds
+- [x] A sensible default is inferred at decomposition time and is editable
+- [x] Schema validates the shape
 
 **Verification:**
-- [ ] Unit tests over the extended schema
-- [ ] Manual: confirm decomposition produces reasonable defaults
+- [x] Unit tests over the extended schema
+- [x] Manual: confirm decomposition produces reasonable defaults
+
+**Done 2026-09-22.** `DoneCriteriaSchema` already existed as a T3-era
+placeholder (`{testLayers, coverageThreshold?}`); the real remaining work
+was wiring an inferred default into decomposition and making it editable.
+
+`decompose.ts` (T6) now fills in `doneCriteria` for any proposal that
+doesn't already have one — via a new `inferDoneCriteria()` that reuses T9's
+`extractFeatures()`, the SAME test-layer detection T10's estimator will
+use, so decomposition and estimation agree about what a task needs (same
+reasoning T9 itself gives for reusing the router's complexity score).
+Deliberately never infers a `coverageThreshold` — a global default number
+would be exactly the kind of unfounded precision this repo has repeatedly
+avoided elsewhere (see I9, C4); a human sets one explicitly if they want
+one. "Editable" is the same dry-run → edit JSON → `--from-file --yes` loop
+T6 already built: `parseProposals` now accepts an explicit `doneCriteria`
+on any proposal, and an explicit one is always respected as-is, never
+overwritten by the inferred default.
+
+6 new unit tests (`inferDoneCriteria` picks up an explicit test-layer
+mention, returns an empty list rather than fabricating one when nothing
+suggests a layer, never infers a coverage threshold; `parseProposals`
+leaves `doneCriteria` unset by default and accepts an explicit one) plus
+an end-to-end CLI test proving an explicit `doneCriteria` survives
+untouched alongside an inferred one in the same decompose run. Verified
+via the real compiled CLI: three proposals (integration-test-shaped,
+doc-fix-shaped, and an explicit `{testLayers: [], coverageThreshold:
+null}`) produced the expected `[integration, e2e]`, `[]`, and untouched
+explicit criteria respectively, all four resulting records (task + the
+citing requirement) valid.
 
 **Dependencies:** T3, T6
 **Files likely touched:** record schemas, decomposition agent, tests

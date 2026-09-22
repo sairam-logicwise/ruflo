@@ -81,7 +81,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 
 ## Phase 5: Test-gated done
 
-- [ ] **T18** Done criteria on the task record — *S* — deps: T3, T6
+- [x] **T18** Done criteria on the task record — *S* — deps: T3, T6
 - [ ] **T19** Test runner and derived status — *M* — deps: T15, T18
 - [ ] **T20** Wrap the red-to-green repair loop — *M* — deps: T19
 
