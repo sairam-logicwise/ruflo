@@ -103,6 +103,10 @@ const commandLoaders: Record<string, CommandLoader> = {
   // plan). Nested `record` to avoid colliding with the existing `task`
   // command (swarm/agent runtime task orchestration — a different concept).
   record: () => import('./records.js'),
+  // Mechanical backfill pass — structure/deps/entry-points/test-presence
+  // per area, from the Graphify graph alone, no model calls (T23,
+  // agentic SDLC plan).
+  backfill: () => import('./backfill.js'),
   // AGNTCY/Outshift runtime transport selection (ADR-324 §2) — optional,
   // removable augmentation; no-ops to local transport when AGNTCY/SLIM is
   // not configured (RUFLO_AGNTCY_SLIM_ENDPOINT unset).

@@ -1176,13 +1176,56 @@ per-issue message; a normal well-written one was accepted.
 **Why this matters:** Deterministic, free, and it grounds the inferred pass that follows. Graphify already reports a token cost of zero for extraction, so this is effectively free to re-run whenever the graph refreshes. Doing this before any inference means the agent reasons about real structure rather than guessing it.
 
 **Acceptance criteria:**
-- [ ] Per-area summary of modules, dependencies, entry points and test presence
-- [ ] Runs with no model calls and no token cost
-- [ ] Output is reproducible from a given commit
+- [x] Per-area summary of modules, dependencies, entry points and test presence
+- [x] Runs with no model calls and no token cost
+- [x] Output is reproducible from a given commit
 
 **Verification:**
-- [ ] Run against two areas, spot-check accuracy against the code
-- [ ] Confirm zero token spend
+- [x] Run against two areas, spot-check accuracy against the code
+- [x] Confirm zero token spend
+
+**Done 2026-09-22.** `v3/@claude-flow/cli/src/backfill/area-summary.ts`
+exports `summarizeArea(area, graphPath)` — a pure function of the
+Graphify graph, no I/O beyond reading that one file. Definitions, each
+directly graph-derivable:
+- **modules**: code-type nodes whose `source_file` starts with the area prefix, excluding test files.
+- **testFiles**: same set, test-path-pattern files only (co-located tests — this repo's own convention keeps tests in a separate top-level `__tests__/`, so this is legitimately empty for most areas, not a bug).
+- **dependencies**: an `imports`/`imports_from` edge written INSIDE the area, resolving to a file OUTSIDE it.
+- **entryPoints**: a reference (`imports`/`imports_from`/`calls`) written OUTSIDE the area, resolving to a file INSIDE it — the area's real, graph-verified boundary.
+- **testedModules/untestedModules**: whether any test file anywhere in the repo references a given module.
+
+New `ruflo backfill summarize <area>` CLI command surfaces it.
+
+**Verified against two real areas** (D3's `v3/@claude-flow/cli/src/ruvector/`
+and `v3/@claude-flow/docops/src/`), spot-checked against the actual code,
+not just plausible-looking output — e.g. confirmed directly with `grep`
+that `ast-analyzer.ts` being reported as an entry point is correct: `commands/analyze.ts`
+genuinely imports it from outside the area. Zero model/network calls —
+confirmed both by code inspection (no `callAnthropicMessages`, no
+`fetch`, nothing that reaches a network) and by literally running
+`graphify update .` (the underlying extraction) and reading its own
+"no LLM needed" output.
+
+**Two real, worth-recording limitations found via this verification, in
+the underlying graph data — not bugs in this module:**
+1. Graphify's own AST extraction missed `token-count.ts` entirely (zero
+   nodes for a real, valid, currently-committed file) — confirmed after a
+   full graph rebuild against the current HEAD, so not a staleness
+   artifact. A gap in the external tool's own extraction, out of scope to
+   patch here; `summarizeArea` is correct given whatever the graph says.
+2. Cross-package (bare-specifier) imports don't resolve to a target file
+   under AST-only extraction — `docops/src/index.ts` is genuinely the
+   package's real public entry point (`package.json`'s `main`), but
+   nothing outside `@claude-flow/docops` imports it via a traceable
+   RELATIVE path, so it's reported as having no external references. The
+   entry-point definition is accurate for intra-repo, relative-import
+   boundaries (verified); it under-counts at workspace-package
+   boundaries. Documented, not silently wrong.
+
+9 unit tests over a synthetic fixture graph (each field in isolation,
+reproducibility — the exact same graph produces byte-identical output —
+a missing target node not crashing, and a genuinely isolated area
+reporting empty dependencies/entry-points/coverage rather than guessing).
 
 **Dependencies:** T1
 **Files likely touched:** new backfill module, tests
