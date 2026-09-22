@@ -25,8 +25,19 @@
  * capped at ONE repair attempt per task per `ruflo run` invocation, not
  * just per repair-loop call: retrying an already-failed repair on the next
  * pass would bypass T20's own per-invocation budget entirely, exactly the
- * runaway-spend scenario T20's design note warns about. A cross-*run*
- * spend ceiling belongs to T25's own dependent, T26 — not duplicated here.
+ * runaway-spend scenario T20's design note warns about.
+ *
+ * T26's cross-task spend ceiling (`--spend-ceiling`, generous default) is
+ * the second, independent backstop on top of that: it sums every repair's
+ * `totalCostUsd` for the life of this one invocation and, once the running
+ * total reaches the ceiling, refuses any FURTHER repair attempt for the
+ * rest of the run — reported the same way any other stuck task is. It
+ * only gates the repair phase, the only phase that spends anything today;
+ * free transitions (drafted/specified/verifying) keep advancing
+ * regardless, since a dollar ceiling has nothing to say about them. The
+ * ceiling is a local variable, never persisted, so a resumed run after a
+ * kill starts its count at zero — there is nothing to double-count,
+ * because there is nowhere spend from a PRIOR invocation is stored.
  *
  * "All state lives in records, so the loop is restartable" (the task's own
  * rationale) needs no extra machinery here: every task file is read fresh
@@ -61,6 +72,15 @@ interface Stuck {
 }
 
 const DEFAULT_MAX_PASSES = 50;
+/**
+ * T26: "generous by default" — this is a backstop, not a policy, and
+ * "should almost never fire" (the task's own rationale). $50 is 10x a
+ * single task's own default $5 repair budget (repair-loop.ts), generous
+ * enough to cover a real unattended run across many tasks without
+ * interfering with normal work, while still being a real, finite ceiling
+ * for the first overnight run nobody is watching.
+ */
+const DEFAULT_SPEND_CEILING_USD = 50;
 
 const runCommand: Command = {
   name: 'run',
@@ -73,6 +93,7 @@ const runCommand: Command = {
     { name: 'model', description: 'Model tier for repair (default haiku)', type: 'string' },
     { name: 'command', description: "Override the test command (defaults to the project's own `npm test`)", type: 'string' },
     { name: 'max-passes', description: `Safety cap on loop passes (default ${DEFAULT_MAX_PASSES})`, type: 'number' },
+    { name: 'spend-ceiling', description: `Total USD spend ceiling across every repair this run (T26, default ${DEFAULT_SPEND_CEILING_USD}) — a backstop, checked before each repair attempt`, type: 'number' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const dir = kindDir(ctx, 'task');
@@ -83,8 +104,10 @@ const runCommand: Command = {
     const model = ctx.flags.model as string | undefined;
     const commandOverride = ctx.flags.command as string | undefined;
     const maxPasses = (ctx.flags.maxPasses as number | undefined) ?? (ctx.flags['max-passes'] as number | undefined) ?? DEFAULT_MAX_PASSES;
+    const spendCeiling = (ctx.flags.spendCeiling as number | undefined) ?? (ctx.flags['spend-ceiling'] as number | undefined) ?? DEFAULT_SPEND_CEILING_USD;
 
     const repairAttemptedThisRun = new Set<string>();
+    let spentUsd = 0; // T26: local to this invocation only — never persisted, so a resumed run starts at $0, nothing to double-count
     const outcomes: Outcome[] = [];
     let stuck: Stuck[] = [];
     let pass = 0;
@@ -149,10 +172,15 @@ const runCommand: Command = {
             stuck.push({ id: task.id, status: task.status, reason: 'repair already attempted this run — re-run `ruflo run --repair` to try again' });
             continue;
           }
+          if (spentUsd >= spendCeiling) {
+            stuck.push({ id: task.id, status: task.status, reason: `spend ceiling reached ($${spentUsd.toFixed(2)} / $${spendCeiling.toFixed(2)} this run) — raise --spend-ceiling or re-run later` });
+            continue;
+          }
           repairAttemptedThisRun.add(task.id);
 
           const testCommand = resolveTestCommand(ctx.cwd, commandOverride);
           const repairResult = runRepairLoop({ repo: ctx.cwd, testCommand, maxAttempts: maxRepairAttempts, budgetUsd: repairBudget, model, confirm });
+          spentUsd += repairResult.totalCostUsd; // T26: counted the instant it's spent, even if this task ends up stuck below
           if (repairResult.stopReason === 'dry-run') {
             stuck.push({ id: task.id, status: task.status, reason: 'repair dry run only — pass --confirm to actually spend' });
             continue;
@@ -186,6 +214,7 @@ const runCommand: Command = {
     }
 
     for (const o of outcomes) output.printInfo(`${o.id}: ${o.action} -> ${o.status}${o.detail ? ` (${o.detail})` : ''}`);
+    if (repairEnabled) output.printInfo(`spend this run: $${spentUsd.toFixed(4)} / $${spendCeiling.toFixed(2)} ceiling`);
     if (stuck.length > 0) {
       output.printWarning(`stopped after ${pass} pass(es) — ${stuck.length} task(s) need a human:`);
       for (const s of stuck) output.writeln(`  ${s.id} (${s.status}): ${s.reason}`);
@@ -195,7 +224,7 @@ const runCommand: Command = {
       output.printSuccess(`stopped after ${pass} pass(es) — no tasks remaining`);
     }
 
-    return { success: true, data: { passes: pass, outcomes, stuck } };
+    return { success: true, data: { passes: pass, outcomes, stuck, spentUsd, spendCeilingUsd: spendCeiling } };
   },
 };
 

@@ -1485,17 +1485,65 @@ touch) green.
 **Why this matters:** The team has decided against fixed retry and spend limits, which is reasonable while somebody is watching. It is not safe for the first overnight run, where a repeating failure can consume budget with nobody present. This is a backstop, not a policy — it should almost never fire, and when it does it has prevented a bad night.
 
 **Acceptance criteria:**
-- [ ] A total spend ceiling can be set per run
-- [ ] The loop stops cleanly when reached and reports spend against quote
-- [ ] Default is generous enough not to interfere with normal work
+- [x] A total spend ceiling can be set per run
+- [x] The loop stops cleanly when reached and reports spend against quote
+- [x] Default is generous enough not to interfere with normal work
 
 **Verification:**
-- [ ] Test with a low ceiling: loop stops at the limit and records state
-- [ ] Confirm a resumed run does not double-count spend
+- [x] Test with a low ceiling: loop stops at the limit and records state
+- [x] Confirm a resumed run does not double-count spend
 
 **Dependencies:** T25
 **Files likely touched:** autonomy loop, budget service, tests
 **Estimated scope:** S
+
+**Done 2026-09-22.** No separate "budget service" file — folded directly
+into `run.ts` (T25) as the task's own "Files likely touched" allowed
+("autonomy loop, budget service"), since the only thing in this codebase
+that spends real money is T20's repair loop, which `run.ts` already calls
+directly. A `let spentUsd = 0` local to the command's `action()`
+accumulates every repair's real `totalCostUsd` (T20's own, never
+estimated) for the life of one invocation; before each repair attempt,
+`spentUsd >= spendCeiling` is checked and, once true, every further
+repair-eligible task is reported stuck with the running total and the
+ceiling, exactly like any other "needs a human" gate — no
+`runRepairLoop()` call happens once the ceiling is reached, so nothing is
+spent past it. `--spend-ceiling` (default $50 — 10x a single task's own
+default $5 repair budget, "generous enough not to interfere with normal
+work" while still being a real, finite backstop) is the per-run knob;
+"reports spend against quote" is read as "against the configured
+ceiling," the only budget concept this codebase has today — T10/T11's
+quote system doesn't exist yet.
+
+Free transitions (`drafted`/`specified`/`verifying`) are deliberately
+NOT gated by the ceiling — they cost nothing, so a dollar figure has
+nothing to say about them; a `--spend-ceiling 0` run still fully advances
+every task that doesn't need repair.
+
+"Confirm a resumed run does not double-count spend" needed no new
+machinery, for the same structural reason T25 itself is resumable: the
+counter is a plain local variable inside `action()`, never written to a
+file or any module-level state. There is nowhere a prior invocation's
+spend COULD be carried from — proven, not just asserted, by a test that
+runs the command twice in the same process and confirms the second
+call's `spentUsd` is `0`, not the first call's `$5`, and that
+`runRepairLoop` genuinely isn't called a second time (not just that the
+number happens to read zero).
+
+**Verified for real, at $0**: 3 new tests (ceiling stops a second
+task's repair attempt before `runRepairLoop` is ever called — with the
+ceiling deliberately set below a single attempt's own cost, so the first
+attempt's spend, not just the ceiling number, is what blocks the second;
+a fresh invocation's spend never carries forward; free transitions ignore
+the ceiling entirely) plus two real runs against the compiled CLI and the
+actual `tdd-repair.mjs` script: `--spend-ceiling 0` refuses to spawn the
+script AT ALL (confirmed by wall-clock — the whole command completed in
+under half a second, no child process launched) and the default $50
+ceiling still runs the real, unmodified $0 pre-flight-refusal path T20's
+own smoke test established.
+
+Full regression: 124 docops + 98 CLI tests (the files this task's changes
+touch) green.
 
 ---
 

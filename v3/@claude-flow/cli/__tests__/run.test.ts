@@ -198,6 +198,73 @@ describe('ruflo run', () => {
     expect(data.stuck.some((s) => /already attempted this run/.test(s.reason))).toBe(true);
   });
 
+  it('T26: stops attempting repair once the spend ceiling is reached, without calling the repair loop again', async () => {
+    const blockedPatch = (raw: string) => {
+      let r = raw.replace('status: drafted', 'status: blocked');
+      r = r.replace('---\n\n', 'blocked:\n  reason: the test result is red\n  unblockCondition: fix it\n  fromState: verifying\n---\n\n');
+      return r;
+    };
+    await createTask(blockedPatch);
+    const second = await createTask(blockedPatch);
+    vi.mocked(runRepairLoop).mockReturnValue({ repaired: false, stopReason: 'max-attempts-exhausted', attempts: [], totalCostUsd: 0.2, lastOutput: 'still broken' });
+
+    ctx.args = [];
+    ctx.flags = { repair: true, confirm: true, spendCeiling: 0.15, _: [] };
+    const result = await runCommand.action!(ctx);
+
+    // Both tasks are eligible, but the ceiling ($0.15) is below even the FIRST repair's cost ($0.2) —
+    // so the second task must never reach the repair loop at all.
+    expect(runRepairLoop).toHaveBeenCalledTimes(1);
+    const data = result?.data as { stuck: Array<{ id: string; reason: string }>; spentUsd: number; spendCeilingUsd: number };
+    expect(data.stuck.some((s) => s.id === second.id && /spend ceiling reached/.test(s.reason))).toBe(true);
+    expect(data.spentUsd).toBeCloseTo(0.2);
+    expect(data.spendCeilingUsd).toBe(0.15);
+  });
+
+  it('T26: a fresh invocation never carries spend forward from a previous one', async () => {
+    const blockedPatch = (raw: string) => {
+      let r = raw.replace('status: drafted', 'status: blocked');
+      r = r.replace('---\n\n', 'blocked:\n  reason: the test result is red\n  unblockCondition: fix it\n  fromState: verifying\n---\n\n');
+      return r;
+    };
+    await createTask(blockedPatch);
+    vi.mocked(runRepairLoop).mockReturnValue({ repaired: true, stopReason: 'repaired', attempts: [], totalCostUsd: 5 });
+    vi.mocked(verifyTask).mockResolvedValue({
+      transition: { ok: true, to: 'done' },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+    });
+
+    ctx.args = [];
+    ctx.flags = { repair: true, confirm: true, spendCeiling: 100, _: [] };
+    const firstRun = await runCommand.action!(ctx);
+    expect((firstRun?.data as { spentUsd: number }).spentUsd).toBeCloseTo(5);
+    expect(runRepairLoop).toHaveBeenCalledTimes(1);
+
+    // A second, separate invocation (a real second `ruflo run`) — the task is now `done` (the
+    // repair succeeded), so there is nothing left to repair. This run must report $0 of its own,
+    // never the first invocation's $5 — there is no module-level or persisted counter it could
+    // have carried that $5 forward from.
+    vi.mocked(runRepairLoop).mockClear();
+    ctx.flags = { repair: true, confirm: true, spendCeiling: 100, _: [] };
+    const secondRun = await runCommand.action!(ctx);
+    expect((secondRun?.data as { spentUsd: number }).spentUsd).toBe(0);
+    expect(runRepairLoop).not.toHaveBeenCalled();
+  });
+
+  it('the spend ceiling never gates free transitions (drafted/specified/verifying)', async () => {
+    await createTask((raw) =>
+      raw.replace(
+        '---\n\n',
+        'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: []\n---\n\n',
+      ),
+    );
+    ctx.args = [];
+    ctx.flags = { spendCeiling: 0, _: [] }; // already exhausted, but nothing here costs anything
+    const result = await runCommand.action!(ctx);
+    const data = result?.data as { outcomes: Array<{ status: string }> };
+    expect(data.outcomes.some((o) => o.status === 'implementing')).toBe(true);
+  });
+
   it('the resulting records always validate', async () => {
     await createTask((raw) => raw.replace('status: drafted', 'status: verifying'));
     vi.mocked(verifyTask).mockResolvedValue({
