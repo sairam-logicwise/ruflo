@@ -1025,18 +1025,92 @@ changes touch) green.
 **Why this matters:** This is the only tier nobody can bypass — not an agent, not `--no-verify`, not a transport switch. Every rule we genuinely care about must be expressed here, because tiers 1 and 2 are fast feedback and this one is the contract. Without branch protection turned on, this job is advisory too.
 
 **Acceptance criteria:**
-- [ ] PR with an invalid record set fails CI
-- [ ] PR with code changes but no citing task record fails CI
-- [ ] Job is a required status check on the default branch
+- [x] PR with an invalid record set fails CI
+- [x] PR with code changes but no citing task record fails CI (advisory — see below)
+- [ ] Job is a required status check on the default branch — NOT done, D4 reserves this for Sairam
 
 **Verification:**
-- [ ] Open a deliberately invalid PR, confirm it is blocked from merging
-- [ ] Open a valid PR, confirm it passes
-- [ ] Confirm branch protection is actually enabled, not just the workflow present
+- [ ] Open a deliberately invalid PR, confirm it is blocked from merging — can't verify "blocked from merging" until D4 happens; the job itself is verified (see below)
+- [x] Open a valid PR, confirm it passes — verified via real git history diffs, not a literal opened PR (see below)
+- [ ] Confirm branch protection is actually enabled, not just the workflow present — explicitly not this task's call (D4)
 
 **Dependencies:** T15, T16
 **Files likely touched:** `.github/workflows/sdlc-gate.yml`, repo settings
 **Estimated scope:** S
+
+**Done 2026-09-22.** `.github/workflows/sdlc-gate.yml` — a normal
+(non-required) GitHub Actions job on every PR into `main`. Builds the v3
+workspace, then runs three checks:
+
+1. `ruflo record validate` — T3/T4's existing schema/citation-contract/
+   readability/content-hash gate, now repeated at CI (tier 3), matching
+   this task's own rationale: "tiers 1 and 2 are fast feedback... every
+   rule we genuinely care about must be expressed here."
+2. `ruflo record phase-check` — NEW command
+   (`v3/@claude-flow/cli/src/commands/phase-check.ts`), the "phase-gate
+   check" this task's description names as the second thing CI must run.
+   `record validate` alone can't catch this: a task record with
+   `status: implementing` and no `doneCriteria` at all currently PASSES
+   it (those fields are `.optional()` — T18/T19 formalize them per task,
+   not as a blanket schema requirement). `phase-check` is a read-only,
+   NEVER-writes audit that a task's CURRENT recorded status is still
+   earned by its CURRENT fields — reuses `attemptTransition()` (T15) as a
+   pure query rather than duplicating its PRECONDITIONS, replaying every
+   resumable state strictly before a task's own status with FRESH
+   evidence (`checkCitationAcceptance()`, T16). Catches drift a live
+   transition wouldn't: a requirement accepted when a task reached
+   `specified` that got superseded afterward is flagged retroactively,
+   even for a task already `done` — deliberately excluding the live
+   `verifying -> done` test-evidence gate, since replaying it would mean
+   re-running the whole test suite inside a "check the records" command,
+   redundant with the project's own CI test job.
+3. `scripts/ci/task-citation-check.mjs` (+ pure
+   `task-citation-check-lib.mjs`, same split-logic pattern T5's
+   pre-commit hook already established) — the mechanical form of
+   criterion 2. The task schema has no file-path field mapping a task to
+   the files it covers, so this can only check "did SOME `docs/tasks/`
+   record change ride along with a non-docs change in this PR," never
+   "does a task's citations genuinely COVER these specific files" — the
+   same kind of honestly-mechanical-not-semantic scoping T9/T21 already
+   used. Run with `continue-on-error: true` — advisory, not
+   merge-blocking, on purpose (see below).
+
+**Deliberately NOT done, both by design, not oversight:**
+- Branch protection / "required status check" is explicitly D4's
+  decision ("Sairam enables branch protection on the day this task
+  merges, not before") — this task adds the job; turning it on is a real
+  repo-settings change reserved for the repo owner, same reasoning this
+  session applied to every other repo-setting/security-default decision.
+- Criterion 2's check is real and running, but a genuine consequence
+  surfaced before writing it and was put to the user directly: EVERY
+  commit this session has made so far (29 of them) touched `tasks/
+  plan.md`/`todo.md` (the human checklist) but ZERO touched
+  `docs/tasks/*.md` (the formal record files this literal check wants) —
+  confirmed via `git log --name-only`. Making this check required today
+  would immediately block this very plan's own ongoing work. User chose
+  to build it honestly as specified and keep it advisory for now,
+  deciding separately, later, how this plan's own meta-work should be
+  tracked before ever making it required.
+
+**Verified for real**: 11 new tests for `phase-check` (passes on empty/
+drafted/blocked; passes and fails correctly at `specified`/`implementing`/
+`done`; retroactive citation-supersession caught even for a `done` task;
+confirmed it never writes to disk) and 6 new tests for
+`task-citation-check`. The YAML itself parses — run through this repo's
+own `scripts/smoke-workflows-yaml.mjs` guard (the exact tool #2267 exists
+because a broken workflow YAML silently produces zero jobs) alongside all
+29 other existing workflows, all OK. `task-citation-check.mjs` run for
+real against actual repo history: diffing the T16 commit against its own
+parent correctly flags it (9 non-docs files, no `docs/tasks/` change —
+expected, matches the finding above); diffing a ref against itself
+(empty diff) correctly passes. `record validate` and `record phase-check`
+both run for real against THIS repo's actual (near-empty) record set —
+one real `docs/decisions/DEC-001-...md` file, no `docs/requirements/` or
+`docs/tasks/` directory at all — confirming both commands handle a
+missing-directory repo gracefully, not just a populated scratch one.
+
+Full regression: 126 docops + 122 CLI + 14 root-level script tests (the
+files this task's changes touch) green.
 
 ---
 
