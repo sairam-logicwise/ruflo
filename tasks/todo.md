@@ -1,7 +1,7 @@
 # Task List: Tool-Neutral Agentic SDLC
 
 Full detail, acceptance criteria and rationale: [plan.md](./plan.md)
-**Status:** T1-T5, T7, T12 implemented. Review #1 ([review-2026-09-21.md](./review-2026-09-21.md)) and Review #2 ([review-2026-09-22.md](./review-2026-09-22.md)) are both **closed — all Criticals, blockers and Important items verified fixed by execution, including the one follow-up** (the B1 regression test couldn't run under vitest's `threads` pool; fixed by dropping `process.chdir()` for a subprocess-based approach, verified passing under the real CI invocation shape). Ready for T6.
+**Status:** T1-T7, T9, T12 implemented (T8 deliberately held back — see below). Review #1 ([review-2026-09-21.md](./review-2026-09-21.md)) and Review #2 ([review-2026-09-22.md](./review-2026-09-22.md)) are both **closed — all Criticals, blockers and Important items verified fixed by execution, including the one follow-up** (the B1 regression test couldn't run under vitest's `threads` pool; fixed by dropping `process.chdir()` for a subprocess-based approach, verified passing under the real CI invocation shape). T6 and T9 done 2026-09-22 (peer-session handoff, user approved T6+T9, held T8 back since it spends real money — see plan.md's Task 8). T6's automated verification is complete; one manual step (judging real decomposition output quality) is pending user authorization to spend on live LLM calls. T10/T11 remain blocked on T8.
 
 Legend — scope: **S** 1-2 files · **M** 3-5 files
 
@@ -36,7 +36,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 
 ## Phase 2: Quote a feature — FIRST DEMO
 
-- [ ] **T6** Requirement decomposition agent — *M* — deps: T1, T4
+- [x] **T6** Requirement decomposition agent — *M* — deps: T1, T4 (real-LLM quality pass still pending — see plan.md)
 - [x] **T7** Build training corpus from the existing trajectory log — *S* — deps: none
 - [ ] **T8** Calibration set: 15-20 labelled pilot tasks — *M* — deps: T4, T7 — budget $50 (D5)
 - [x] **T9** Feature extractor for a task record — *M* — deps: T1, T3

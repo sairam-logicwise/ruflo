@@ -472,15 +472,51 @@ pass — not blocking anything now.
 **Why this matters:** A quote is a rollup over task records, so nothing can be estimated until a requirement has been decomposed. This is also the step that makes the quote explainable: when a stakeholder asks why a feature costs what it costs, the answer is the task list, not an opaque number. Grounding it in the real code graph is what stops it inventing modules that do not exist.
 
 **Acceptance criteria:**
-- [ ] Given a requirement, produces 3-15 task records that validate
-- [ ] Each task cites the source requirement
-- [ ] Tasks reference real files or modules from the graph
-- [ ] Output is reviewable and editable before it is committed
+- [x] Given a requirement, produces 3-15 task records that validate
+- [x] Each task cites the source requirement
+- [x] Tasks reference real files or modules from the graph
+- [x] Output is reviewable and editable before it is committed
 
 **Verification:**
-- [ ] Run against three requirements of differing size, inspect output quality manually
-- [ ] All produced records pass `ruflo validate`
-- [ ] Confirm referenced paths exist in the repo
+- [ ] Run against three requirements of differing size, inspect output quality manually — **not done**: this needs a real, paid LLM call, and the user held T8 back specifically because it spends money. Verified everything else about the pipeline (prompt building, response parsing, grounding, record writing) end-to-end via `--from-file` and a mocked LLM call instead, at $0. Flag for the user: do they want to authorize a few real decompose calls to judge actual output quality, same as the T8 decision?
+- [x] All produced records pass `ruflo validate` — verified via the real compiled CLI: created a real requirement, decomposed it via `--from-file`, `--yes`, then ran `ruflo record validate` — all records (requirement + tasks) pass
+- [x] Confirm referenced paths exist in the repo — verified via the real compiled CLI with a real graph fixture: a proposal citing one real file (`src/pricing.ts`, present in the graph) and one hallucinated file (`src/totally-made-up-file.ts`, not in the graph) produced a task record containing only the real path
+
+**Done 2026-09-22, pending a real-LLM quality pass.** New CLI subcommand
+`ruflo record req decompose <id>` in `src/commands/decompose.ts`. Reuses
+`callAnthropicMessages` from `mcp-tools/agent-execute-core.ts` (the same
+primitive `agent_execute` uses) rather than the heavier swarm agent-store
+machinery — a one-shot call needs no persistent agent. Grounding reuses
+T9's `groundInGraph()` (exported from `estimator/features.ts` for this).
+Because a real call costs real money, this is **dry-run by default**
+(prints proposals, writes nothing) — `--yes` commits them, `--from-file`
+skips the LLM call entirely and takes a (possibly hand-edited) proposals
+JSON, which is the "reviewable and editable before committed" loop:
+dry-run → save output → edit → `--from-file edited.json --yes`. Grounding
+validation (dropping any file the model — or a hand-edit — references that
+isn't actually in the graph) applies on BOTH paths, not just the live-LLM
+one.
+
+Extracted the shared record-storage helpers (`kindDir`, `claimAndWriteRecord`,
+`slugify`, `findRecordPath`, `resolveBody`, `formatValidationError`, ...)
+out of `records.ts` into a new `records-io.ts` — decompose.ts needs them
+too, and a direct `records.ts` ↔ `decompose.ts` circular import would have
+been fragile (works only if `records.ts` always loads first; breaks if
+anything ever imports `decompose.ts` directly, which the test suite does).
+This also brought `records.ts` back under this repo's 500-line guideline
+(578 → 466).
+
+26 unit tests cover prompt building, response parsing (valid/invalid JSON,
+too few/many tasks, missing fields, a markdown-fenced response, non-string
+file entries), grounding (keeps real files, drops hallucinated ones), and
+the full CLI command via both `--from-file` and a mocked LLM call. **A real
+bug was caught only by testing against the real compiled binary, not the
+unit tests**: the CLI's flag parser normalizes `--from-file` to
+`ctx.flags.fromFile`, not `ctx.flags['from-file']` — the same dual-form
+check `resolveBody()` already does for `--body-file`, which I should have
+matched from the start. Fixed, with a regression test constructing `ctx`
+with the camelCase form directly (a unit test alone would never have found
+this, since a hand-built `ctx` object doesn't go through the real parser).
 
 **Dependencies:** T1, T4
 **Files likely touched:** agent definition, `v3/@claude-flow/cli/src/commands/records.ts`

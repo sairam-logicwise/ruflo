@@ -146,6 +146,16 @@ function findFilesLikelyTouched(text: string, graph: Graph | null): string[] {
     .sort();
 }
 
+/**
+ * Grounds arbitrary text (not necessarily a task record) against the
+ * Graphify code graph — the same token-overlap matching `extractFeatures`
+ * uses for `filesLikelyTouched`. Exported for `decompose.ts` (T6), which
+ * needs the same grounding applied to a REQUIREMENT's text, not a task's.
+ */
+export function groundInGraph(text: string, graphPath: string): string[] {
+  return findFilesLikelyTouched(text, loadGraph(graphPath));
+}
+
 function findTestLayers(text: string, files: string[]): TestLayer[] {
   const layers = new Set<TestLayer>();
   const lower = text.toLowerCase();
