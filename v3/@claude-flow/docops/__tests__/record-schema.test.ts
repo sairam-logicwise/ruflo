@@ -49,7 +49,7 @@ function validTask(overrides: Record<string, unknown> = {}) {
   return {
     id: 'TASK-001',
     title: 'Fix inherited pricing and tokenizer bugs',
-    status: 'backlog',
+    status: 'drafted',
     priority: 'p1',
     createdAt: now,
     updatedAt: now,

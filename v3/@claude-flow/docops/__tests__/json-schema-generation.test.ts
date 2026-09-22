@@ -90,7 +90,7 @@ describe('buildRecordJsonSchema — real ajv validation, not just shape assertio
   it('rejects a task citing only another task (contains constraint catches what minItems cannot)', () => {
     const validate = compile('task', TaskSchema);
     const task = {
-      id: 'TASK-002', title: 'x', status: 'backlog', priority: 'p1',
+      id: 'TASK-002', title: 'x', status: 'drafted', priority: 'p1',
       createdAt: now, updatedAt: now, citations: ['TASK-001'], dependsOn: [],
       contentHash: hash, provenance: 'human',
     };
@@ -110,7 +110,7 @@ describe('buildRecordJsonSchema — real ajv validation, not just shape assertio
   it('accepts a well-formed task citing a requirement', () => {
     const validate = compile('task', TaskSchema);
     const task = {
-      id: 'TASK-001', title: 'x', status: 'backlog', priority: 'p1',
+      id: 'TASK-001', title: 'x', status: 'drafted', priority: 'p1',
       createdAt: now, updatedAt: now, citations: ['REQ-001'], dependsOn: [],
       contentHash: hash, provenance: 'human',
     };

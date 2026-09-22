@@ -67,7 +67,7 @@ Legend — scope: **S** 1-2 files · **M** 3-5 files
 
 ## Phase 4: The gate
 
-- [ ] **T15** Task state machine with transition preconditions — *M* — deps: T3
+- [x] **T15** Task state machine with transition preconditions — *M* — deps: T3
 - [ ] **T16** Phase gate in the MCP client authorisation path — *M* — deps: T15
 - [ ] **T17** CI required check — *S* — deps: T15, T16 — Sairam enables branch protection same day (D4)
 

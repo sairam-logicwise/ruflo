@@ -70,7 +70,7 @@ describe('validateRecord — kind resolution from id prefix', () => {
   it('resolves TASK- to the task schema and enforces its citation contract', () => {
     const hash = computeContentHash('body');
     const result = validateRecord({
-      id: 'TASK-001', title: 'x', status: 'backlog', priority: 'p1', createdAt: now, updatedAt: now,
+      id: 'TASK-001', title: 'x', status: 'drafted', priority: 'p1', createdAt: now, updatedAt: now,
       citations: [], dependsOn: [], contentHash: hash, provenance: 'human',
     });
     expect(result.success).toBe(false); // empty citations — task contract
@@ -100,7 +100,7 @@ describe('validateRecordFile — end to end on a real file string', () => {
       [
         'id: TASK-012',
         'title: Fix inherited pricing bugs',
-        'status: backlog',
+        'status: drafted',
         'priority: p1',
         `createdAt: ${now}`,
         `updatedAt: ${now}`,
@@ -124,7 +124,7 @@ describe('validateRecordFile — end to end on a real file string', () => {
       [
         'id: TASK-013',
         'title: Orphan task',
-        'status: backlog',
+        'status: drafted',
         'priority: p2',
         `createdAt: ${now}`,
         `updatedAt: ${now}`,
@@ -184,7 +184,7 @@ describe('serializeRecordFile — the write side (T4)', () => {
     // files nobody had touched.
     const body = '# Title\nSome content the contributor wrote.\n';
     const frontmatter = {
-      id: 'TASK-100', title: 'CRLF checkout', status: 'backlog', priority: 'p2',
+      id: 'TASK-100', title: 'CRLF checkout', status: 'drafted', priority: 'p2',
       createdAt: now, updatedAt: now, citations: ['REQ-001'], dependsOn: [],
       contentHash: computeContentHash(body), provenance: 'human',
     };
@@ -207,7 +207,7 @@ describe('serializeRecordFile — the write side (T4)', () => {
     const frontmatter = {
       id: 'TASK-099',
       title: 'Round-trip task',
-      status: 'backlog',
+      status: 'drafted',
       priority: 'p2',
       createdAt: now,
       updatedAt: now,

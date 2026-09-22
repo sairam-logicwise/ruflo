@@ -843,14 +843,54 @@ tsc errors, unrelated `@claude-flow/cli-core` resolution — see HANDOVER.md
 **Why this matters:** This is the object the gate enforces against. Without it, "mandatory step" has no definition to point at. Modelling `Blocked` as a real state with a named reason is what makes escalation legible — the system can say which decision it is waiting on rather than just stopping.
 
 **Acceptance criteria:**
-- [ ] All six states and their legal transitions implemented
-- [ ] Each precondition is a pure function over record state
-- [ ] `Blocked` carries a reason and the condition that would unblock it
-- [ ] `'failed'` is not terminal anywhere
+- [x] All six states and their legal transitions implemented
+- [x] Each precondition is a pure function over record state
+- [x] `Blocked` carries a reason and the condition that would unblock it
+- [x] `'failed'` is not terminal anywhere
 
 **Verification:**
-- [ ] Unit tests over every legal and illegal transition
-- [ ] Test asserting failure routes to `Blocked`, not `Done`
+- [x] Unit tests over every legal and illegal transition
+- [x] Test asserting failure routes to `Blocked`, not `Done`
+
+**Done 2026-09-22.** `state-machine.ts` implements `drafted → specified →
+implementing → verifying → done`, each forward edge guarded by a pure
+precondition function `(task, context) => verdict`. A failed precondition
+never leaves the task where it was and never advances it — it always
+returns a `blocked` verdict carrying `{reason, unblockCondition,
+fromState}`, so there is no separate "failed" state to get stuck in by
+construction, not by convention.
+
+`verifying → done`'s real precondition (tests green, coverage above
+threshold) needs live evidence T19 hasn't built yet — rather than fake it,
+the precondition takes an optional `TransitionContext.testResult` and
+fails CLOSED when a task declares at least one required test layer
+(T18's `doneCriteria`) but no result was supplied. A task that declares
+zero required layers (a deliberate, valid choice — a config-only change
+doesn't need one) is exempt, matching T18's whole point: the bar is
+per-task, not global.
+
+Repurposed the existing `TaskStatusSchema` enum (`backlog/active/blocked/
+done`, a coarser T3-era placeholder) to these six states directly, rather
+than adding a second field — no real task records existed in this repo
+yet, so there was nothing to migrate. This had a real, necessary ripple:
+`records.ts`'s `task new` default status, `decompose.ts`'s hardcoded
+status, and several docops test fixtures all referenced the old enum
+values and needed updating to keep validating. Caught one real bug this
+way too: after updating the source, the compiled CLI binary still used
+the OLD default ('backlog') until an actual rebuild — `npx tsc --noEmit`
+type-checks source, it doesn't refresh `dist/`. Found by running the real
+compiled binary end-to-end (a task creation failed validation with the
+stale default), not by the type-check alone.
+
+53 unit tests (`__tests__/state-machine.test.ts`): every legal forward
+transition (including the exempt-zero-layers and no-coverage-threshold
+cases), every precondition failure and its `blocked` shape, a full 6×6
+`isLegalTransition` matrix (36 pairs) confirming exactly the legal edges
+and nothing else, `done` having zero outgoing edges, and `blocked` never
+resuming into itself or straight into `done`. Verified end-to-end via the
+real compiled CLI (task creation now defaults to `drafted` and validates;
+`decompose --yes` writes `drafted` tasks too) after the rebuild caught the
+stale-binary issue above.
 
 **Dependencies:** T3
 **Files likely touched:** `v3/@claude-flow/docops/src/state-machine.ts`, tests

@@ -221,7 +221,7 @@ const taskNewCommand: Command = {
     // pre-empting the more useful citation-contract message below.
     { name: 'citations', description: 'Comma-separated ids — must include at least one requirement or decision', type: 'string' },
     { name: 'priority', description: 'p0|p1|p2', type: 'string', default: 'p2' },
-    { name: 'status', description: 'backlog|active|blocked|done', type: 'string', default: 'backlog' },
+    { name: 'status', description: 'drafted|specified|implementing|verifying|done|blocked (T15 state machine)', type: 'string', default: 'drafted' },
     { name: 'depends-on', description: 'Comma-separated task ids that must complete first', type: 'string' },
     { name: 'body', description: 'Markdown body text', type: 'string' },
     { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
@@ -254,7 +254,7 @@ const taskNewCommand: Command = {
       const frontmatter = {
         id,
         title,
-        status: (ctx.flags.status as string) ?? 'backlog',
+        status: (ctx.flags.status as string) ?? 'drafted',
         priority: (ctx.flags.priority as string) ?? 'p2',
         createdAt: now,
         updatedAt: now,

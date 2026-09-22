@@ -126,7 +126,7 @@ function writeProposalsAsTasks(
       const frontmatter = {
         id,
         title: proposal.title,
-        status: 'backlog',
+        status: 'drafted',
         priority: 'p2',
         createdAt: now,
         updatedAt: now,

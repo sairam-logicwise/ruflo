@@ -54,3 +54,16 @@ export {
   type ParsedRecordFile,
   type ValidateResult,
 } from './frontmatter.js';
+
+export {
+  TASK_STATES,
+  nextState,
+  attemptTransition,
+  resumeFromBlocked,
+  isLegalTransition,
+  type TaskState,
+  type ResumableState,
+  type BlockedInfo,
+  type TransitionContext,
+  type TransitionResult,
+} from './state-machine.js';

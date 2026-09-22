@@ -20,7 +20,15 @@
 import { z } from 'zod';
 import { BaseRecordShape, RecordIdSchema } from './base.js';
 
-export const TaskStatusSchema = z.enum(['backlog', 'active', 'blocked', 'done']);
+/**
+ * T15's six-state lifecycle (agentic SDLC plan) — the object the gate
+ * (T16) enforces against. Legal transitions and their preconditions live
+ * in state-machine.ts, not here; this enum is just the value space.
+ * Replaces an earlier, coarser backlog/active/blocked/done placeholder —
+ * no real task records existed yet when this changed, so there was
+ * nothing to migrate.
+ */
+export const TaskStatusSchema = z.enum(['drafted', 'specified', 'implementing', 'verifying', 'done', 'blocked']);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 export const TaskPrioritySchema = z.enum(['p0', 'p1', 'p2']);
