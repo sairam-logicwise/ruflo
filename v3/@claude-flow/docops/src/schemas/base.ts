@@ -69,4 +69,19 @@ export const BaseRecordShape = {
    * team (plan.md Task 21's own scoping).
    */
   readabilityStrict: z.boolean().default(false),
+  /**
+   * Review #3, Important 14: readability is wired into the write path
+   * (run.ts refuses to write an invalid result), so a false positive —
+   * the structural checks are heuristics over plain text, not a real
+   * parser, and can misfire on legitimate prose — made a record
+   * permanently unadvanceable with no way out but rewriting around the
+   * heuristic. Explicit, per-record, and visible in the diff that sets
+   * it (not a repo-wide switch, same discipline as readabilityStrict
+   * above): a human sets this to true to accept a record despite a
+   * readability failure they've reviewed and judged a false positive —
+   * validateRecord still RUNS the check either way, it just stops
+   * treating a failure as fatal. Never set true by anything in this
+   * codebase automatically.
+   */
+  readabilityWaived: z.boolean().default(false),
 };

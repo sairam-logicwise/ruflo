@@ -129,11 +129,25 @@ function checkSentenceLength(sentence: string): ReadabilityIssue | null {
 // adjective, "is finished" as a state) — a documented limitation, not a
 // claim of grammatical precision.
 const BE_FORM = /^(is|are|was|were|be|been|being)$/i;
-const REGULAR_PARTICIPLE = /^[a-z]+(ed|en)$/i;
+/**
+ * Review #3, Important 14: was `/^[a-z]+(ed|en)$/i` — matched any word
+ * ending in "en", not just a past-participle "en". Verified by execution:
+ * "This is often the case," "The port is open," and "The build is green"
+ * all flagged as passive voice, because "often"/"open"/"green" end in
+ * "en". "-ed" alone is a reliable regular-past-participle signal; real
+ * "-en" participles (broken, spoken, frozen, ...) are enumerated in
+ * IRREGULAR_PARTICIPLES below instead of guessed at by suffix.
+ */
+const REGULAR_PARTICIPLE = /^[a-z]+ed$/i;
 const IRREGULAR_PARTICIPLES = new Set([
   'done', 'made', 'seen', 'known', 'shown', 'given', 'taken', 'written',
   'built', 'sent', 'held', 'found', 'lost', 'brought', 'thought', 'bought',
   'run', 'set', 'read', 'put', 'cut', 'chosen', 'grown', 'drawn',
+  // Real "-en" past participles, added when the general "-en" suffix
+  // match was removed above (Important 14) — enumerated, not guessed.
+  'broken', 'spoken', 'frozen', 'stolen', 'hidden', 'forgotten', 'eaten',
+  'beaten', 'fallen', 'risen', 'driven', 'woken', 'sworn', 'torn', 'worn',
+  'born', 'awoken', 'bitten', 'ridden', 'gotten',
 ]);
 
 function checkActiveVoice(sentence: string): ReadabilityIssue | null {

@@ -37,6 +37,20 @@ describe('validateReadability — active voice', () => {
     const result = validateReadability('The file was written by the agent.');
     expect(result.issues.some((i) => i.rule === 'active-voice')).toBe(true);
   });
+
+  // Review #3, Important 14: REGULAR_PARTICIPLE used to be /^[a-z]+(ed|en)$/i
+  // — any word ending in "en", not just a real past participle. Verified
+  // by execution against these exact three sentences.
+  it('does not false-positive on ordinary English ending in "en" (Important 14)', () => {
+    expect(validateReadability('This is often the case.').ok).toBe(true);
+    expect(validateReadability('The port is open.').ok).toBe(true);
+    expect(validateReadability('The build is green.').ok).toBe(true);
+  });
+
+  it('still flags a real "-en" past-participle passive (the fix narrows the false positives, not the real detections)', () => {
+    const result = validateReadability('The build was broken by the change.');
+    expect(result.issues.some((i) => i.rule === 'active-voice')).toBe(true);
+  });
 });
 
 describe('validateReadability — one instruction per sentence', () => {

@@ -301,6 +301,27 @@ describe('readability gate (T21, agentic SDLC plan)', () => {
     }
   });
 
+  // Review #3, Important 14: a readability failure used to be permanently
+  // unfixable-by-appeal — no way to accept a record a human has reviewed
+  // and judged a false positive.
+  it('readabilityWaived accepts a record that fails readability, and surfaces what was waived', () => {
+    const body = 'This might possibly be updated prior to the release and then merged once it is reviewed by someone.';
+    const frontmatter = {
+      id: 'REQ-003', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+    };
+
+    const rejected = validateRecord(frontmatter, body);
+    expect(rejected.success).toBe(false); // unwaived: still rejected, same as before
+
+    const waived = validateRecord({ ...frontmatter, readabilityWaived: true }, body);
+    expect(waived.success).toBe(true);
+    if (waived.success) {
+      expect(waived.waivedIssues).toBeDefined();
+      expect(waived.waivedIssues!.length).toBeGreaterThan(0); // the check still ran — waiving doesn't hide that issues were found
+    }
+  });
+
   it('validateRecord accepts a well-written body', () => {
     const body = 'This change fixes the pricing bug. It affects only the OpenRouter path.';
     const result = validateRecord(

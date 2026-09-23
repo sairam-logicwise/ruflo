@@ -135,7 +135,7 @@ export class ReadabilityError extends Error {
 }
 
 export type ValidateResult =
-  | { success: true; record: AnyRecord }
+  | { success: true; record: AnyRecord; waivedIssues?: ReadabilityIssue[] }
   | { success: false; error: Error };
 
 /**
@@ -169,6 +169,13 @@ export function validateRecord(frontmatter: Record<string, unknown>, body?: stri
     // commit messages never reach this function.
     const readability = validateReadability(body, { strict: frontmatter.readabilityStrict === true });
     if (!readability.ok) {
+      // Review #3, Important 14: readabilityWaived lets a human accept a
+      // record despite a reviewed, judged-false-positive failure — the
+      // check still RUNS (readability.issues is real), it just stops
+      // being fatal. Never set automatically anywhere in this codebase.
+      if (frontmatter.readabilityWaived === true) {
+        return { success: true, record: result.data as AnyRecord, waivedIssues: readability.issues };
+      }
       return { success: false, error: new ReadabilityError(readability.issues) };
     }
   }
