@@ -276,7 +276,7 @@ const runCommand: Command = {
         const reason = task.status === 'blocked'
           ? `${task.blocked?.reason ?? 'blocked'} — needs a human`
           : task.status === 'implementing'
-            ? 'implementing has no automated phase-runner — an agent or human must declare it ready for verifying'
+            ? 'implementing has no automated phase-runner — needs a human or agent to run `ruflo record task ready` once implementation is actually finished'
             : `"${task.status}" has no automated phase-runner yet — needs a human`;
         stuck.push({ id: task.id, status: task.status, reason });
       }

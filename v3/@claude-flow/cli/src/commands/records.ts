@@ -46,6 +46,7 @@ import {
 import decomposeCommand from './decompose.js';
 import taskVerifyCommand from './task-verify.js';
 import taskRepairCommand from './task-repair.js';
+import taskReadyCommand from './task-ready.js';
 import phaseCheckCommand from './phase-check.js';
 import workflowDocsCommand from './workflow-docs.js';
 
@@ -350,7 +351,7 @@ const taskListCommand: Command = {
 const recordTaskCommand: Command = {
   name: 'task',
   description: 'Task records — the "what work" (T3/T4, agentic SDLC plan). Not to be confused with `ruflo task`, the swarm/agent runtime task command.',
-  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskVerifyCommand, taskRepairCommand],
+  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskReadyCommand, taskVerifyCommand, taskRepairCommand],
   action: taskListCommand.action,
 };
 
