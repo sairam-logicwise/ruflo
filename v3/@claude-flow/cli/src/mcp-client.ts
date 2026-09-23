@@ -25,6 +25,7 @@ import { progressTools } from './mcp-tools/progress-tools.js';
 import { embeddingsTools } from './mcp-tools/embeddings-tools.js';
 import { claimsTools } from './mcp-tools/claims-tools.js';
 import { quoteTools } from './mcp-tools/quote-tools.js';
+import { recordWorkflowTools } from './mcp-tools/record-workflow-tools.js';
 import { policyTools } from './mcp-tools/policy-tools.js';
 import { authorizeMcpTool, classifyMcpTool } from './services/policy-runtime.js';
 import { securityTools } from './mcp-tools/security-tools.js';
@@ -195,6 +196,11 @@ registerTools([
   // T11/TASK-022, agentic SDLC plan — quote_requirement + quote_backlog,
   // the same roll-up logic `ruflo quote` uses via the CLI.
   ...quoteTools,
+  // Review #3, C2 — record/run/phase-check/decompose/backfill, reachable
+  // from any MCP client, not just this CLI. Same Command.action the CLI
+  // itself runs (command-bridge.ts), so "the record is the gate, not the
+  // prompt" is enforced here too, not only when a tool happens to shell out.
+  ...recordWorkflowTools,
 ]);
 
 // The capability brain consumes the completed live registry. This is injected
