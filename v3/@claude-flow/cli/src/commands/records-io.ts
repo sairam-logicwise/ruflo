@@ -15,7 +15,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import { parseRecordFile, type RecordKind, type CitationAcceptance, type Task, type TransitionResult } from '@claude-flow/docops';
+import { parseRecordFile, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals } from '@claude-flow/docops';
+import type { RepairLoopResult } from '../ruvector/repair-loop.js';
 
 const KIND_DIR: Record<RecordKind, string> = {
   requirement: 'requirements',
@@ -146,6 +147,29 @@ export function applyTaskTransition(
     newFrontmatter.blocked = transition.blocked;
   }
   return newFrontmatter;
+}
+
+/**
+ * T13: turns a repair loop's real spend into an `Actuals` patch —
+ * `task-repair.ts` and `run.ts`'s repair branch both end a repair attempt
+ * this same way, so it lives here once. Real cost with no real token data
+ * happens: `RepairAttemptResult`'s own doc explains why `inputTokens`/
+ * `outputTokens` are optional (a round that failed before producing usage
+ * — `tdd-repair-unavailable`, a config error — has nothing to report).
+ * Returns `undefined` rather than `{inputTokens: 0, outputTokens: 0,
+ * costUsd}` in that case — a real, nonzero cost with fabricated zero
+ * tokens would teach the estimator (T10) a wrong, too-cheap association,
+ * the same reasoning corpus.ts's own Important-7 exclusion already
+ * applies. Also `undefined` for a dry run (`attempts.length === 0`,
+ * nothing was ever spent) — there is nothing to record either way.
+ */
+export function buildRepairActuals(repairResult: RepairLoopResult): Actuals | undefined {
+  if (repairResult.totalInputTokens === undefined || repairResult.totalOutputTokens === undefined) return undefined;
+  return {
+    inputTokens: repairResult.totalInputTokens,
+    outputTokens: repairResult.totalOutputTokens,
+    costUsd: repairResult.totalCostUsd,
+  };
 }
 
 /**

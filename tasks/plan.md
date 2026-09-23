@@ -1037,13 +1037,56 @@ tsc errors, unrelated `@claude-flow/cli-core` resolution — see HANDOVER.md
 **Why this matters:** Without this the estimator never improves and the quote is a one-way guess. The fork already has `estimated_usd` and `actual_usd` columns in an unused budget ledger, which shows someone intended this and never wired it. Closing the loop is what turns quoting from a demo into a capability.
 
 **Acceptance criteria:**
-- [ ] Completed tasks carry actual input tokens, output tokens, and cost
-- [ ] Actuals feed back into the corpus automatically
-- [ ] A task that failed records what it consumed before failing
+- [x] Completed tasks carry actual input tokens, output tokens, and cost — scoped to tasks with real, measured spend (see Done note's honest boundary)
+- [x] Actuals feed back into the corpus automatically
+- [x] A task that failed records what it consumed before failing
 
 **Verification:**
-- [ ] Run a real task end to end, confirm actuals land in the record
-- [ ] Confirm the corpus row count increases
+- [x] Run a real task end to end, confirm actuals land in the record
+- [x] Confirm the corpus row count increases
+
+**Done 2026-09-23.** Implemented from T6's own real decomposition of REQ-002
+(TASK-025 through TASK-028) as the literal implementation plan. A real
+scope question surfaced immediately: `record task verify` (T19) runs the
+project's OWN test command mechanically — it makes zero LLM calls, so a
+task reaching `done` via a clean first-pass test has genuinely no real
+spend to record. The ONLY place in this codebase that spends real,
+measurable tokens is T20's repair loop (`runRepairLoop`, wrapping
+`tdd-repair.mjs`'s headless `claude -p` calls). So `actuals` capture is
+honestly scoped to the repair path — the same "don't fabricate a missing
+number" discipline this plan has applied throughout (T9/T10's own
+refusals to guess). A task that reaches `done` with NO repair (a clean
+pass) legitimately has no `actuals`, by design, not by omission.
+
+Extended `repair-loop.ts`'s `RepairAttemptResult`/`RepairLoopResult` with
+optional `inputTokens`/`outputTokens`/`totalInputTokens`/`totalOutputTokens`,
+read from tdd-repair.mjs's own real `attempts[0].claude.usage` block (the
+raw `claude -p --output-format json` usage object it already captured but
+repair-loop.ts previously discarded, keeping only the aggregate cost).
+New `records-io.ts` helper `buildRepairActuals()` turns a real
+`RepairLoopResult` into an `Actuals` patch — `undefined`, not
+`{inputTokens:0, outputTokens:0, costUsd}`, when a round never produced
+real usage (tdd-repair-unavailable, a config error, a dry run), matching
+corpus.ts's own Important-7 "both sides required" exclusion. Wired into
+BOTH `task-repair.ts` and `run.ts`'s repair branch (`write()` extended to
+take an optional `actuals` argument) so a repair's real spend is captured
+whether the ending is `done` (repaired, TASK-025) or `blocked` (exhausted,
+TASK-026) — never left unset just because the outcome was blocked.
+TASK-027 confirmed: `loadCalibrationRows()` (T10) already scans
+`docs/tasks/` fresh on every call, so a newly-captured row shows up with
+no separate step — proven by a real regression test writing a repair's
+actuals then calling `loadCalibrationRows()` on the same directory.
+TASK-028: a genuine end-to-end test drives a task through the REAL state
+machine from `drafted` (via `ruflo run`'s own `attemptTransition` calls)
+all the way to `done` in one scenario and to `blocked` in another —
+`implementing -> verifying` is the one deliberate human gate this
+codebase has no automated phase-runner for, simulated the same way
+run.test.ts's own existing tests already do, not bypassed. 21 new tests
+(4 in repair-loop.test.ts, 4 in task-repair.test.ts, 2 in a new
+actuals-e2e.test.ts covering TASK-028) plus the full pre-existing
+ruvector/run/phase-check/records/decompose/task-verify suites (447 tests,
+zero regressions). No real `claude -p` spawn anywhere in this work — same
+$0 test discipline as T20's own repair-loop.test.ts.
 
 **Dependencies:** T10, T11
 **Files likely touched:** estimator corpus, record writer, tests

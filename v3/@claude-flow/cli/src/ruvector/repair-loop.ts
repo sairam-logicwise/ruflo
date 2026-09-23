@@ -53,6 +53,19 @@ export interface RepairAttemptResult {
   exitCode: number | null;
   costUsd: number;
   outputHash: string | null;
+  /**
+   * T13: real input/output tokens for this round, read from tdd-repair.mjs's
+   * own `attempts[0].claude.usage` (the raw `claude -p --output-format json`
+   * usage block — tdd-repair.mjs's own comment: "emits {result, usage,
+   * ...}"). Optional, not defaulted to 0: a round that never produced usage
+   * (tdd-repair-unavailable, a config error) has genuinely no token data,
+   * and 0 would misrepresent that as "measured, cost nothing" instead of
+   * "never measured" — the same "don't fabricate a missing number"
+   * reasoning corpus.ts's own Important-7 exclusion already applies to a
+   * trajectory row with no usable tokens.
+   */
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type RepairStopReason =
@@ -69,6 +82,9 @@ export interface RepairLoopResult {
   stopReason: RepairStopReason;
   attempts: RepairAttemptResult[];
   totalCostUsd: number;
+  /** T13: sum of every real attempt's inputTokens/outputTokens. Undefined (not 0) when no attempt carried real usage — see RepairAttemptResult's own doc. */
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
   /** The last attempt's test/failure output — attached so an exhausted repair leaves a diagnosable trail, not a dead end. */
   lastOutput?: string;
   plan?: { repo: string; testCommand: string; maxAttempts: number; budgetUsd: number; model: string };
@@ -113,6 +129,8 @@ export function runRepairLoop(opts: RepairLoopOptions): RepairLoopResult {
   const attempts: RepairAttemptResult[] = [];
   let previousHash: string | null = null;
   let totalCostUsd = 0;
+  let totalInputTokens: number | undefined;
+  let totalOutputTokens: number | undefined;
   let lastOutput: string | undefined;
 
   for (let i = 1; i <= maxAttempts; i++) {
@@ -153,24 +171,34 @@ export function runRepairLoop(opts: RepairLoopOptions): RepairLoopResult {
 
     const costUsd = (parsed.data?.totalCostUsd as number | undefined) ?? 0;
     totalCostUsd += costUsd;
+    // --max-attempts 1 pins tdd-repair.mjs to exactly one internal round per
+    // spawn, so its own attempts[0] is THIS round's real usage.
+    const roundAttempts = parsed.data?.attempts as Array<{ claude?: { usage?: { input_tokens?: number; output_tokens?: number } } }> | undefined;
+    const usage = roundAttempts?.[0]?.claude?.usage;
+    const inputTokens = usage?.input_tokens;
+    const outputTokens = usage?.output_tokens;
+    if (inputTokens !== undefined || outputTokens !== undefined) {
+      totalInputTokens = (totalInputTokens ?? 0) + (inputTokens ?? 0);
+      totalOutputTokens = (totalOutputTokens ?? 0) + (outputTokens ?? 0);
+    }
     const outputText = JSON.stringify(parsed.data?.after ?? parsed.data?.attempts ?? '');
     const outputHash = hashOutput(outputText);
     lastOutput = outputText;
 
-    attempts.push({ attempt: i, repaired: !!parsed.success, exitCode: result.status, costUsd, outputHash });
+    attempts.push({ attempt: i, repaired: !!parsed.success, exitCode: result.status, costUsd, outputHash, inputTokens, outputTokens });
 
     if (parsed.success) {
-      return { repaired: true, stopReason: 'repaired', attempts, totalCostUsd, lastOutput, plan };
+      return { repaired: true, stopReason: 'repaired', attempts, totalCostUsd, totalInputTokens, totalOutputTokens, lastOutput, plan };
     }
     if (previousHash !== null && outputHash === previousHash) {
-      return { repaired: false, stopReason: 'repeated-failure', attempts, totalCostUsd, lastOutput, plan };
+      return { repaired: false, stopReason: 'repeated-failure', attempts, totalCostUsd, totalInputTokens, totalOutputTokens, lastOutput, plan };
     }
     previousHash = outputHash;
 
     if (totalCostUsd >= budgetUsd) {
-      return { repaired: false, stopReason: 'budget-exhausted', attempts, totalCostUsd, lastOutput, plan };
+      return { repaired: false, stopReason: 'budget-exhausted', attempts, totalCostUsd, totalInputTokens, totalOutputTokens, lastOutput, plan };
     }
   }
 
-  return { repaired: false, stopReason: 'max-attempts-exhausted', attempts, totalCostUsd, lastOutput, plan };
+  return { repaired: false, stopReason: 'max-attempts-exhausted', attempts, totalCostUsd, totalInputTokens, totalOutputTokens, lastOutput, plan };
 }

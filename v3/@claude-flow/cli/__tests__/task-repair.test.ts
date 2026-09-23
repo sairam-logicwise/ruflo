@@ -21,6 +21,7 @@ vi.mock('../src/ruvector/test-runner.js', async () => {
 
 import { runRepairLoop } from '../src/ruvector/repair-loop.js';
 import { verifyTask } from '../src/ruvector/test-runner.js';
+import { loadCalibrationRows } from '../src/ruvector/estimator/corpus.js';
 
 function sub(cmd: Command, ...path: string[]): Command {
   let current = cmd;
@@ -187,6 +188,105 @@ describe('ruflo record task repair', () => {
     expect(written).toMatch(/max-attempts-exhausted/);
     expect(written).toContain('TypeError: still broken');
     expect(written).toContain('fromState: verifying');
+  });
+
+  // T13: a repair's real spend is captured into the record's actuals field,
+  // whether the repair ended repaired (TASK-025) or exhausted-and-blocked
+  // (TASK-026) — never left unset just because the ending was blocked.
+  it('writes real actuals onto a successful repair', async () => {
+    const { id, filePath } = await createTaskInState('blocked', { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' });
+    vi.mocked(runRepairLoop).mockReturnValue({
+      repaired: true,
+      stopReason: 'repaired',
+      attempts: [{ attempt: 1, repaired: true, exitCode: 0, costUsd: 0.2, outputHash: 'abc', inputTokens: 1200, outputTokens: 300 }],
+      totalCostUsd: 0.2,
+      totalInputTokens: 1200,
+      totalOutputTokens: 300,
+    });
+    vi.mocked(verifyTask).mockResolvedValue({
+      transition: { ok: true, to: 'done' },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+    });
+
+    ctx.args = [id];
+    ctx.flags = { confirm: true, _: [] };
+    await sub(recordCommand, 'task', 'repair').action!(ctx);
+
+    const written = readFileSync(filePath, 'utf8');
+    expect(written).toMatch(/actuals:\s*\n\s*inputTokens:\s*1200/);
+    expect(written).toMatch(/outputTokens:\s*300/);
+    expect(written).toMatch(/costUsd:\s*0\.2/);
+  });
+
+  it('writes real actuals onto an exhausted, still-blocked repair (TASK-026 — never left unset on failure)', async () => {
+    const { id, filePath } = await createTaskInState('blocked', { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' });
+    vi.mocked(runRepairLoop).mockReturnValue({
+      repaired: false,
+      stopReason: 'max-attempts-exhausted',
+      attempts: [
+        { attempt: 1, repaired: false, exitCode: 1, costUsd: 0.1, outputHash: 'a', inputTokens: 1000, outputTokens: 200 },
+        { attempt: 2, repaired: false, exitCode: 1, costUsd: 0.1, outputHash: 'b', inputTokens: 1100, outputTokens: 220 },
+      ],
+      totalCostUsd: 0.2,
+      totalInputTokens: 2100,
+      totalOutputTokens: 420,
+      lastOutput: 'still broken',
+    });
+
+    ctx.args = [id];
+    ctx.flags = { confirm: true, _: [] };
+    const result = await sub(recordCommand, 'task', 'repair').action!(ctx);
+    expect(result?.success).toBe(true);
+    expect(verifyTask).not.toHaveBeenCalled();
+
+    const written = readFileSync(filePath, 'utf8');
+    expect(written).toContain('status: blocked');
+    expect(written).toMatch(/actuals:\s*\n\s*inputTokens:\s*2100/);
+    expect(written).toMatch(/outputTokens:\s*420/);
+  });
+
+  // TASK-027: T10's loadCalibrationRows scans docs/tasks/ fresh on every
+  // call — a newly-captured actuals row should show up on the very next
+  // read, with no separate manual step.
+  it('a task actuals-captured by repair feeds the estimator corpus on the next read, automatically', async () => {
+    const { id } = await createTaskInState('blocked', { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' });
+    expect(loadCalibrationRows(tmp)).toEqual([]); // nothing in the corpus yet
+
+    vi.mocked(runRepairLoop).mockReturnValue({
+      repaired: false,
+      stopReason: 'max-attempts-exhausted',
+      attempts: [{ attempt: 1, repaired: false, exitCode: 1, costUsd: 0.15, outputHash: 'a', inputTokens: 900, outputTokens: 150 }],
+      totalCostUsd: 0.15,
+      totalInputTokens: 900,
+      totalOutputTokens: 150,
+      lastOutput: 'still broken',
+    });
+
+    ctx.args = [id];
+    ctx.flags = { confirm: true, _: [] };
+    await sub(recordCommand, 'task', 'repair').action!(ctx);
+
+    const rows = loadCalibrationRows(tmp); // no extra step — same corpus reader T10/T11 already use
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ inputTokens: 900, outputTokens: 150, source: 'calibration' });
+    expect(rows[0].complexity).toBeGreaterThanOrEqual(0);
+    expect(rows[0].complexity).toBeLessThanOrEqual(1);
+  });
+
+  it('omits actuals entirely when the repair never produced real usage data (no fabricated zeros)', async () => {
+    const { id, filePath } = await createTaskInState('blocked', { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' });
+    vi.mocked(runRepairLoop).mockReturnValue({
+      repaired: false,
+      stopReason: 'tdd-repair-unavailable',
+      attempts: [{ attempt: 1, repaired: false, exitCode: 1, costUsd: 0, outputHash: null }],
+      totalCostUsd: 0,
+    });
+
+    ctx.args = [id];
+    ctx.flags = { confirm: true, _: [] };
+    await sub(recordCommand, 'task', 'repair').action!(ctx);
+
+    expect(readFileSync(filePath, 'utf8')).not.toContain('actuals:');
   });
 
   it('the resulting record always validates, on both endings', async () => {

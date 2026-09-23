@@ -110,4 +110,54 @@ describe('runRepairLoop', () => {
     const result = runRepairLoop({ repo: '/tmp/x', testCommand: 'npm test', confirm: true, maxAttempts: 2, budgetUsd: 100 });
     expect(result.lastOutput).toContain('distinct failure 2');
   });
+
+  // T13: real token capture from tdd-repair.mjs's own attempts[0].claude.usage.
+  describe('real token capture (T13)', () => {
+    it('reads input/output tokens from a successful round and sums them onto the result', () => {
+      vi.mocked(spawnSync).mockReturnValue(jsonResult({
+        after: { passed: true },
+        totalCostUsd: 0.2,
+        attempts: [{ claude: { usage: { input_tokens: 1200, output_tokens: 300 } } }],
+      }, true));
+      const result = runRepairLoop({ repo: '/tmp/x', testCommand: 'npm test', confirm: true });
+      expect(result.attempts[0].inputTokens).toBe(1200);
+      expect(result.attempts[0].outputTokens).toBe(300);
+      expect(result.totalInputTokens).toBe(1200);
+      expect(result.totalOutputTokens).toBe(300);
+    });
+
+    it('sums tokens across multiple real rounds, not just the last one', () => {
+      let call = 0;
+      vi.mocked(spawnSync).mockImplementation(() => {
+        call++;
+        const passed = call === 3;
+        return jsonResult({
+          after: { passed, output: passed ? undefined : `differs ${call}` },
+          totalCostUsd: 0.1,
+          attempts: [{ claude: { usage: { input_tokens: 1000 * call, output_tokens: 100 * call } } }],
+        }, passed);
+      });
+      const result = runRepairLoop({ repo: '/tmp/x', testCommand: 'npm test', confirm: true, maxAttempts: 5, budgetUsd: 100 });
+      expect(result.stopReason).toBe('repaired');
+      expect(result.attempts).toHaveLength(3);
+      expect(result.totalInputTokens).toBe(1000 + 2000 + 3000);
+      expect(result.totalOutputTokens).toBe(100 + 200 + 300);
+    });
+
+    it('leaves totalInputTokens/totalOutputTokens undefined — not 0 — when a round never produced usage', () => {
+      vi.mocked(spawnSync).mockReturnValue(jsonResult({ after: { passed: true }, totalCostUsd: 0.05 }, true));
+      const result = runRepairLoop({ repo: '/tmp/x', testCommand: 'npm test', confirm: true });
+      expect(result.totalInputTokens).toBeUndefined();
+      expect(result.totalOutputTokens).toBeUndefined();
+      expect(result.attempts[0].inputTokens).toBeUndefined();
+      expect(result.attempts[0].outputTokens).toBeUndefined();
+    });
+
+    it('stays undefined on tdd-repair-unavailable — no round ever ran far enough to produce usage', () => {
+      vi.mocked(spawnSync).mockReturnValue({ status: 1, stdout: 'not json', stderr: 'boom', signal: null } as never);
+      const result = runRepairLoop({ repo: '/tmp/x', testCommand: 'npm test', confirm: true });
+      expect(result.totalInputTokens).toBeUndefined();
+      expect(result.totalOutputTokens).toBeUndefined();
+    });
+  });
 });

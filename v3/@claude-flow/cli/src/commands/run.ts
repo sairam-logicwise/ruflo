@@ -74,7 +74,7 @@ import { join } from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, type Task, type TransitionResult } from '@claude-flow/docops';
-import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance } from './records-io.js';
+import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance, buildRepairActuals } from './records-io.js';
 import { verifyTask, resolveTestCommand } from '../ruvector/test-runner.js';
 import { runRepairLoop } from '../ruvector/repair-loop.js';
 
@@ -155,8 +155,10 @@ const runCommand: Command = {
 
         if (task.status === 'done') continue;
 
-        const write = (transition: TransitionResult): string | undefined => {
-          const newFrontmatter = applyTaskTransition(frontmatter, transition);
+        // T13: `actuals` is optional — only the repair branch below ever
+        // passes it (the only phase here with any real spend to report).
+        const write = (transition: TransitionResult, actuals?: ReturnType<typeof buildRepairActuals>): string | undefined => {
+          const newFrontmatter = { ...applyTaskTransition(frontmatter, transition), ...(actuals ? { actuals } : {}) };
           const validatedNew = validateRecord(newFrontmatter, body);
           if (!validatedNew.success) return `refusing to write invalid result: ${formatValidationError(validatedNew.error)}`;
           writeFileSync(filePath, serializeRecordFile(newFrontmatter, body), 'utf8');
@@ -249,7 +251,8 @@ const runCommand: Command = {
                   fromState: 'verifying',
                 },
               };
-          const err = write(transition);
+          // T13: written whether this ended repaired or exhausted-and-blocked.
+          const err = write(transition, buildRepairActuals(repairResult));
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;
           outcomes.push({ id: task.id, action: 'repaired', status: transition.ok ? transition.to : 'blocked', detail: `$${repairResult.totalCostUsd.toFixed(4)}, ${repairResult.stopReason}` });
