@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, type Task } from '@claude-flow/docops';
-import { kindDir, findRecordPath, formatValidationError, applyTaskTransition } from './records-io.js';
+import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, buildVerificationReceipt } from './records-io.js';
 import { verifyTask } from '../ruvector/test-runner.js';
 
 const taskVerifyCommand: Command = {
@@ -82,7 +82,12 @@ const taskVerifyCommand: Command = {
       output.printInfo(`${testRun.command} — exit ${testRun.exitCode}, ${(testRun.durationMs / 1000).toFixed(1)}s${coverageNote}`);
     }
 
-    const newFrontmatter = applyTaskTransition(frontmatter, transition);
+    // Review #3, C1: persist the real receipt a test run produced — never
+    // discarded, so phase-check can audit verifying -> done against it.
+    const newFrontmatter: Record<string, unknown> = {
+      ...applyTaskTransition(frontmatter, transition),
+      ...(testRun ? { verification: buildVerificationReceipt(testRun, frontmatter.contentHash as string) } : {}),
+    };
 
     const validatedNew = validateRecord(newFrontmatter, body);
     if (!validatedNew.success) {

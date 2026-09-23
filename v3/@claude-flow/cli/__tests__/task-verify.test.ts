@@ -88,7 +88,7 @@ describe('ruflo record task verify', () => {
 
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 100 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 100, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [id];
@@ -110,7 +110,7 @@ describe('ruflo record task verify', () => {
         to: 'blocked',
         blocked: { reason: 'the test result is red', unblockCondition: 'fix the failing tests, then re-run verification', fromState: 'verifying' },
       },
-      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 50 },
+      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 50, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [id];
@@ -129,7 +129,7 @@ describe('ruflo record task verify', () => {
     const { id, filePath } = await createTaskInState('verifying');
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
     ctx.args = [id];
     ctx.flags = { _: [] };

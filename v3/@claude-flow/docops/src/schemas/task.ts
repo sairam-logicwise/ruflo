@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod';
-import { BaseRecordShape, RecordIdSchema } from './base.js';
+import { BaseRecordShape, RecordIdSchema, ContentHashSchema } from './base.js';
 
 /**
  * T15's six-state lifecycle (agentic SDLC plan) — the object the gate
@@ -75,6 +75,31 @@ export const ActualsSchema = z
   .strict();
 export type Actuals = z.infer<typeof ActualsSchema>;
 
+/**
+ * Review #3, C1: a real record of a real test run, persisted on the
+ * transition instead of discarded. `phase-check.ts` uses this to audit
+ * `verifying -> done`, the one transition the state machine's own gate
+ * previously never re-checked — a hand-written `status: done` with a
+ * fabricated `doneCriteria` and no receipt at all used to pass both
+ * `record validate` and `record phase-check` cleanly. `contentHash`
+ * pins the receipt to the exact body it verified: if the body changes
+ * afterward (a hand-edit, or a real fix landing after a real failure),
+ * the OLD receipt no longer backs the CURRENT content, and phase-check
+ * treats that the same as no receipt at all.
+ */
+export const VerificationReceiptSchema = z
+  .object({
+    command: z.string().min(1),
+    exitCode: z.number(),
+    coverage: z.number().min(0).max(100).optional(),
+    timestamp: z.string().datetime(),
+    gitSha: z.string().min(1),
+    /** The record's own `contentHash` at the moment this receipt was produced — see module doc. */
+    contentHash: ContentHashSchema,
+  })
+  .strict();
+export type VerificationReceipt = z.infer<typeof VerificationReceiptSchema>;
+
 /** T18 formalized this: which test layers apply and an optional coverage bar, declared per task. */
 export const DoneCriteriaSchema = z
   .object({
@@ -122,6 +147,7 @@ export const TaskObjectSchema = z
     actuals: ActualsSchema.optional(),
     doneCriteria: DoneCriteriaSchema.optional(),
     blocked: BlockedSchema.optional(),
+    verification: VerificationReceiptSchema.optional(),
     // Override the base's optional/empty-allowed citations with the
     // citation contract: non-empty, and not satisfied by other tasks alone.
     citations: z

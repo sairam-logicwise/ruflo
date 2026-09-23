@@ -20,10 +20,23 @@
  * FRESH evidence (`checkCitationAcceptance()`, same as T16's `run.ts`
  * wiring), so a requirement that was accepted when a task reached
  * `specified` but got superseded afterward is caught here, not just at
- * the moment of transition. `verifying -> done`'s test-evidence gate is
- * deliberately excluded — replaying it would mean re-running the whole
- * test suite inside a "check the records" command, redundant with the
- * project's own CI test job.
+ * the moment of transition.
+ *
+ * Review #3, C1: `verifying -> done` used to be excluded entirely on the
+ * reasoning that auditing it would mean re-running the whole test suite
+ * inside a "check the records" command. That reasoning missed a real gap
+ * — a hand-written `status: done` with a fabricated `doneCriteria` and no
+ * test evidence at all passed this command cleanly, because nothing here
+ * ever looked at whether `done` had actually been earned. The fix isn't
+ * to re-run tests (still true, still out of scope, still the project's
+ * own CI test job) — it's to check the RECEIPT `task-verify.ts`/
+ * `task-repair.ts`/`run.ts` now persist on every real test run
+ * (`buildVerificationReceipt`, records-io.ts). A `done` task with any
+ * required test layer must carry a `verification` receipt whose own
+ * `contentHash` matches the record's CURRENT `contentHash` — a missing
+ * receipt (never verified) or a stale one (verified against a body that
+ * has since changed) both fail this the same way a missing test result
+ * always has elsewhere in this plan.
  *
  * @module commands/phase-check
  */
@@ -35,7 +48,7 @@ import { output } from '../output.js';
 import { parseRecordFile, validateRecord, attemptTransition, type Task, type ResumableState } from '@claude-flow/docops';
 import { kindDir, listRecordFiles, formatValidationError, checkCitationAcceptance } from './records-io.js';
 
-/** States strictly before `status` in the forward chain, worth re-checking with fresh evidence. Excludes the live test-evidence gate (verifying -> done) — see module doc. */
+/** States strictly before `status` in the forward chain, worth re-checking with fresh evidence. `verifying -> done` is audited separately, against the persisted receipt — see module doc. */
 function statesToAudit(status: Task['status']): ResumableState[] {
   switch (status) {
     case 'specified': return ['drafted'];
@@ -44,6 +57,26 @@ function statesToAudit(status: Task['status']): ResumableState[] {
     case 'done': return ['drafted', 'specified', 'implementing'];
     default: return []; // drafted: nothing prior to audit; blocked: already carries its own diagnosis
   }
+}
+
+/**
+ * Review #3, C1: a `done` task whose declared `doneCriteria.testLayers`
+ * is non-empty must carry a real, CURRENT verification receipt. An empty
+ * `testLayers` is T18's own "a task declared it needs no tests" case —
+ * nothing to audit, by the state machine's own `done` precondition
+ * (state-machine.ts), not a gap in this check.
+ */
+function auditDoneReceipt(task: Task): string | undefined {
+  if (task.status !== 'done') return undefined;
+  const requiredLayers = task.doneCriteria?.testLayers ?? [];
+  if (requiredLayers.length === 0) return undefined;
+  if (!task.verification) {
+    return `status is "done" with required test layers (${requiredLayers.join(', ')}) but carries no verification receipt at all`;
+  }
+  if (task.verification.contentHash !== task.contentHash) {
+    return `status is "done" but its verification receipt was produced against a different body (receipt contentHash ${task.verification.contentHash.slice(0, 12)}… vs current ${task.contentHash.slice(0, 12)}…) — re-verify after the edit`;
+  }
+  return undefined;
 }
 
 const phaseCheckCommand: Command = {
@@ -68,6 +101,9 @@ const phaseCheckCommand: Command = {
           problems.push({ id: task.id, reason: `status is "${task.status}" but no longer satisfies the "${priorState}" precondition: ${transition.blocked.reason}` });
         }
       }
+
+      const receiptProblem = auditDoneReceipt(task);
+      if (receiptProblem) problems.push({ id: task.id, reason: receiptProblem });
     }
 
     if (problems.length > 0) {

@@ -89,7 +89,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
     // verifying -> blocked (a real red test result)
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: false, to: 'blocked', blocked: { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' } },
-      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 12 },
+      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 12, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
     ctx.args = [];
     ctx.flags = { _: [] };
@@ -107,7 +107,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
     });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 9 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 9, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
     ctx.args = [];
     ctx.flags = { repair: true, confirm: true, _: [] };
@@ -126,7 +126,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
 
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: false, to: 'blocked', blocked: { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' } },
-      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 12 },
+      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 12, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
     ctx.args = [];
     ctx.flags = { _: [] };

@@ -194,7 +194,7 @@ describe('ruflo run', () => {
     const { filePath } = await createTask((raw) => raw.replace('status: drafted', 'status: verifying'));
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [];
@@ -208,7 +208,7 @@ describe('ruflo run', () => {
     const { filePath } = await createTask((raw) => raw.replace('status: drafted', 'status: verifying'));
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: false, to: 'blocked', blocked: { reason: 'the test result is red', unblockCondition: 'fix it', fromState: 'verifying' } },
-      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 10 },
+      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [];
@@ -230,7 +230,7 @@ describe('ruflo run', () => {
     vi.mocked(runRepairLoop).mockReturnValue({ repaired: true, stopReason: 'repaired', attempts: [], totalCostUsd: 0.2 });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [];
@@ -294,7 +294,7 @@ describe('ruflo run', () => {
     vi.mocked(runRepairLoop).mockReturnValue({ repaired: true, stopReason: 'repaired', attempts: [], totalCostUsd: 5 });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [];
@@ -332,7 +332,7 @@ describe('ruflo run', () => {
     await createTask((raw) => raw.replace('status: drafted', 'status: verifying'));
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
     ctx.args = [];
     ctx.flags = { _: [] };

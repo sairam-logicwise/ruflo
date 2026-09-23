@@ -33,6 +33,10 @@ export interface TestRunResult {
   coverage?: number;
   /** Files below the requested threshold, from coverageGaps() — omitted when nothing is below it. */
   coverageGapFiles?: string[];
+  /** Review #3, C1: when this run actually happened — feeds the persisted verification receipt. */
+  timestamp: string;
+  /** The repo's HEAD at the moment this run happened — best-effort, 'unknown' if git itself is unavailable (never blocks a real test result on git working). */
+  gitSha: string;
 }
 
 export interface RunTestsOptions {
@@ -46,6 +50,13 @@ export interface RunTestsOptions {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // a real test suite can genuinely take a while
 const OUTPUT_TAIL_CHARS = 20_000;
+
+/** Best-effort HEAD sha — never throws; a git failure shouldn't block a real test result from being usable, it just makes the receipt's provenance weaker (caught by phase-check treating 'unknown' the same as any other real, comparable value — it just won't match a later real sha either). */
+function currentGitSha(cwd: string): string {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' });
+  const sha = result.stdout?.trim();
+  return result.status === 0 && sha ? sha : 'unknown';
+}
 
 /** Exported for T20's repair-loop wiring — tdd-repair.mjs needs the resolved command up front, not just runTests()'s own internal use of it. */
 export function resolveTestCommand(cwd: string, override?: string): string {
@@ -83,7 +94,15 @@ export async function runTests(opts: RunTestsOptions = {}): Promise<TestRunResul
   const exitCode = result.status ?? (result.signal ? 124 : 1);
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.slice(-OUTPUT_TAIL_CHARS);
 
-  const testRun: TestRunResult = { passed: exitCode === 0, exitCode, command, output, durationMs };
+  const testRun: TestRunResult = {
+    passed: exitCode === 0,
+    exitCode,
+    command,
+    output,
+    durationMs,
+    timestamp: new Date().toISOString(),
+    gitSha: currentGitSha(cwd),
+  };
 
   if (opts.coverageThreshold != null) {
     const [overall, gaps] = await Promise.all([

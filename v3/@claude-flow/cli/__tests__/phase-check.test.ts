@@ -165,6 +165,76 @@ describe('ruflo record phase-check', () => {
     expect(result?.success).toBe(true);
   });
 
+  // Review #3, C1: the exploit the review demonstrated end to end — a
+  // hand-written status: done with real test layers declared but no
+  // evidence a test ever ran — is now caught here.
+  describe('verification receipt for done (C1)', () => {
+    it('flags a hand-written "done" with real test layers and no receipt at all', async () => {
+      const { id } = await createTask('accepted', (raw) =>
+        raw
+          .replace('status: drafted', 'status: done')
+          .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: [unit, e2e]\n  coverageThreshold: 95\n---\n\n'),
+      );
+      ctx.args = [];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'phase-check').action!(ctx);
+      expect(result?.success).toBe(false);
+      const data = result?.data as { problems: Array<{ id: string; reason: string }> };
+      expect(data.problems.some((p) => p.id === id && /no verification receipt/.test(p.reason))).toBe(true);
+    });
+
+    it('flags "done" whose receipt was produced against a DIFFERENT body than the one on disk now', async () => {
+      const { id } = await createTask('accepted', (raw) =>
+        raw
+          .replace('status: drafted', 'status: done')
+          .replace(
+            '---\n\n',
+            'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: [unit]\nverification:\n  command: npm test\n  exitCode: 0\n  timestamp: 2026-09-23T00:00:00.000Z\n  gitSha: abc1234\n  contentHash: deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n---\n\n',
+          ),
+      );
+      ctx.args = [];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'phase-check').action!(ctx);
+      expect(result?.success).toBe(false);
+      const data = result?.data as { problems: Array<{ id: string; reason: string }> };
+      expect(data.problems.some((p) => p.id === id && /different body/.test(p.reason))).toBe(true);
+    });
+
+    it('passes "done" with real test layers when the receipt matches the CURRENT content hash', async () => {
+      // Build the record for real first, so contentHash is the record's own real hash.
+      const { filePath } = await createTask('accepted', (raw) =>
+        raw
+          .replace('status: drafted', 'status: done')
+          .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: [unit]\n---\n\n'),
+      );
+      const raw = readFileSync(filePath, 'utf8');
+      const realHash = /contentHash: ([0-9a-f]+)/.exec(raw)![1];
+      writeFileSync(
+        filePath,
+        raw.replace(
+          '---\n\n',
+          `verification:\n  command: npm test\n  exitCode: 0\n  timestamp: 2026-09-23T00:00:00.000Z\n  gitSha: abc1234\n  contentHash: ${realHash}\n---\n\n`,
+        ),
+      );
+      ctx.args = [];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'phase-check').action!(ctx);
+      expect(result?.success).toBe(true);
+    });
+
+    it('does not require a receipt at all when testLayers is empty — T18s own "no tests needed" is a real exemption, not a gap', async () => {
+      await createTask('accepted', (raw) =>
+        raw
+          .replace('status: drafted', 'status: done')
+          .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: []\n---\n\n'),
+      );
+      ctx.args = [];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'phase-check').action!(ctx);
+      expect(result?.success).toBe(true);
+    });
+  });
+
   it('never writes anything — purely read-only, unlike verify/repair/run', async () => {
     const { filePath } = await createTask('accepted', (raw) => raw.replace('status: drafted', 'status: specified'));
     const before = readFileSync(filePath, 'utf8');

@@ -35,6 +35,7 @@ export {
   ActualsSchema,
   DoneCriteriaSchema,
   BlockedSchema,
+  VerificationReceiptSchema,
   type Task,
   type TaskStatus,
   type TaskPriority,
@@ -42,6 +43,7 @@ export {
   type Actuals,
   type DoneCriteria,
   type Blocked,
+  type VerificationReceipt,
 } from './schemas/task.js';
 
 export { computeContentHash } from './content-hash.js';

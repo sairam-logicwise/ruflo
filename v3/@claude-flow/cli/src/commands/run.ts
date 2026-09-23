@@ -74,8 +74,8 @@ import { join } from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, type Task, type TransitionResult } from '@claude-flow/docops';
-import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance, buildRepairActuals } from './records-io.js';
-import { verifyTask, resolveTestCommand } from '../ruvector/test-runner.js';
+import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance, buildRepairActuals, buildVerificationReceipt } from './records-io.js';
+import { verifyTask, resolveTestCommand, type TestRunResult } from '../ruvector/test-runner.js';
 import { runRepairLoop } from '../ruvector/repair-loop.js';
 
 interface Outcome {
@@ -155,10 +155,15 @@ const runCommand: Command = {
 
         if (task.status === 'done') continue;
 
-        // T13: `actuals` is optional — only the repair branch below ever
-        // passes it (the only phase here with any real spend to report).
-        const write = (transition: TransitionResult, actuals?: ReturnType<typeof buildRepairActuals>): string | undefined => {
-          const newFrontmatter = { ...applyTaskTransition(frontmatter, transition), ...(actuals ? { actuals } : {}) };
+        // T13/C1: `actuals`/`verification` are optional patches on top of
+        // the transition — only the verifying and repair branches below
+        // ever have either to report.
+        const write = (transition: TransitionResult, extra: { actuals?: ReturnType<typeof buildRepairActuals>; verification?: ReturnType<typeof buildVerificationReceipt> } = {}): string | undefined => {
+          const newFrontmatter = {
+            ...applyTaskTransition(frontmatter, transition),
+            ...(extra.actuals ? { actuals: extra.actuals } : {}),
+            ...(extra.verification ? { verification: extra.verification } : {}),
+          };
           const validatedNew = validateRecord(newFrontmatter, body);
           if (!validatedNew.success) return `refusing to write invalid result: ${formatValidationError(validatedNew.error)}`;
           writeFileSync(filePath, serializeRecordFile(newFrontmatter, body), 'utf8');
@@ -210,7 +215,7 @@ const runCommand: Command = {
 
         if (task.status === 'verifying') {
           const { transition, testRun } = await verifyTask(task, { cwd: ctx.cwd, command: commandOverride });
-          const err = write(transition);
+          const err = write(transition, { verification: testRun ? buildVerificationReceipt(testRun, frontmatter.contentHash as string) : undefined });
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;
           outcomes.push({ id: task.id, action: 'verified', status: transition.ok ? transition.to : 'blocked', detail: testRun ? `exit ${testRun.exitCode}` : undefined });
@@ -240,19 +245,28 @@ const runCommand: Command = {
             continue;
           }
 
-          const transition: TransitionResult = repairResult.repaired
-            ? (await verifyTask(task, { cwd: ctx.cwd, command: commandOverride })).transition
-            : {
-                ok: false,
-                to: 'blocked',
-                blocked: {
-                  reason: `repair exhausted (${repairResult.stopReason}) after ${repairResult.attempts.length} round(s): ${(repairResult.lastOutput ?? '').slice(0, 2000)}`,
-                  unblockCondition: 'fix the failing test manually, then re-run `ruflo record task verify`',
-                  fromState: 'verifying',
-                },
-              };
-          // T13: written whether this ended repaired or exhausted-and-blocked.
-          const err = write(transition, buildRepairActuals(repairResult));
+          let transition: TransitionResult;
+          let reVerifyTestRun: TestRunResult | undefined;
+          if (repairResult.repaired) {
+            const reVerify = await verifyTask(task, { cwd: ctx.cwd, command: commandOverride });
+            transition = reVerify.transition;
+            reVerifyTestRun = reVerify.testRun;
+          } else {
+            transition = {
+              ok: false,
+              to: 'blocked',
+              blocked: {
+                reason: `repair exhausted (${repairResult.stopReason}) after ${repairResult.attempts.length} round(s): ${(repairResult.lastOutput ?? '').slice(0, 2000)}`,
+                unblockCondition: 'fix the failing test manually, then re-run `ruflo record task verify`',
+                fromState: 'verifying',
+              },
+            };
+          }
+          // T13/C1: written whether this ended repaired or exhausted-and-blocked.
+          const err = write(transition, {
+            actuals: buildRepairActuals(repairResult),
+            verification: reVerifyTestRun ? buildVerificationReceipt(reVerifyTestRun, frontmatter.contentHash as string) : undefined,
+          });
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;
           outcomes.push({ id: task.id, action: 'repaired', status: transition.ok ? transition.to : 'blocked', detail: `$${repairResult.totalCostUsd.toFixed(4)}, ${repairResult.stopReason}` });

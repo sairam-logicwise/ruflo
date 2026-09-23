@@ -115,6 +115,25 @@ describe('record schema — valid record', () => {
       expect(result.success).toBe(true);
     }
   });
+
+  // Review #3, C1: a real verification receipt, persisted on the record.
+  it('accepts a task with a well-formed verification receipt', () => {
+    const result = TaskSchema.safeParse(
+      validTask({
+        verification: { command: 'npm test', exitCode: 0, coverage: 82, timestamp: now, gitSha: 'abc1234', contentHash: hash },
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a verification receipt missing any required field', () => {
+    for (const field of ['command', 'exitCode', 'timestamp', 'gitSha', 'contentHash']) {
+      const receipt: Record<string, unknown> = { command: 'npm test', exitCode: 0, timestamp: now, gitSha: 'abc1234', contentHash: hash };
+      delete receipt[field];
+      const result = TaskSchema.safeParse(validTask({ verification: receipt }));
+      expect(result.success).toBe(false);
+    }
+  });
 });
 
 describe('record schema — missing citation (the citation contract)', () => {

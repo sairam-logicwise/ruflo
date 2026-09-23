@@ -135,7 +135,7 @@ describe('ruflo record task repair', () => {
     });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [id];
@@ -154,7 +154,7 @@ describe('ruflo record task repair', () => {
     vi.mocked(runRepairLoop).mockReturnValue({ repaired: true, stopReason: 'repaired', attempts: [], totalCostUsd: 0.1 });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: false, to: 'blocked', blocked: { reason: 'the test result is red', unblockCondition: 'fix the failing tests, then re-run verification', fromState: 'verifying' } },
-      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 10 },
+      testRun: { passed: false, exitCode: 1, command: 'npm test', output: 'FAIL', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [id];
@@ -205,7 +205,7 @@ describe('ruflo record task repair', () => {
     });
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },
-      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10 },
+      testRun: { passed: true, exitCode: 0, command: 'npm test', output: '', durationMs: 10, timestamp: '2026-09-23T00:00:00.000Z', gitSha: 'abc1234' },
     });
 
     ctx.args = [id];

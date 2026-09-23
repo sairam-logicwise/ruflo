@@ -15,8 +15,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import { parseRecordFile, serializeRecordFile, validateRecord, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals } from '@claude-flow/docops';
+import { parseRecordFile, serializeRecordFile, validateRecord, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals, type VerificationReceipt } from '@claude-flow/docops';
 import type { RepairLoopResult } from '../ruvector/repair-loop.js';
+import type { TestRunResult } from '../ruvector/test-runner.js';
 
 const KIND_DIR: Record<RecordKind, string> = {
   requirement: 'requirements',
@@ -175,6 +176,27 @@ export function buildRepairActuals(repairResult: RepairLoopResult): Actuals | un
     // defensive typing, not a reachable path).
     source: 'measured',
     priceModel: repairResult.plan?.model ?? 'unknown',
+  };
+}
+
+/**
+ * Review #3, C1: turns a real `runTests()`/`verifyTask()` result into the
+ * receipt persisted on the record — `task-verify.ts`, `task-repair.ts`
+ * (after a re-verify), and `run.ts`'s verifying branch all end a real
+ * test run this same way, so it lives here once. `contentHash` is the
+ * record's OWN current contentHash, passed in by the caller (not derived
+ * here — records-io.ts doesn't read the file a second time) — this is
+ * what lets `phase-check.ts` tell "verified against what's on disk right
+ * now" from "verified against a body that has since changed".
+ */
+export function buildVerificationReceipt(testRun: TestRunResult, contentHash: string): VerificationReceipt {
+  return {
+    command: testRun.command,
+    exitCode: testRun.exitCode,
+    ...(testRun.coverage !== undefined ? { coverage: testRun.coverage } : {}),
+    timestamp: testRun.timestamp,
+    gitSha: testRun.gitSha,
+    contentHash,
   };
 }
 
