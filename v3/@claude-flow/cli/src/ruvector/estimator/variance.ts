@@ -28,9 +28,20 @@
  * all). Nothing in this codebase currently writes a task's `estimate`
  * field FROM `predictTokens()` — until something does, this report's
  * hit rate on THIS repo's records measures self-consistency of T8's
- * synthetic band, not estimator accuracy. Reported plainly, not
- * papered over — see the CLI's own `--json` output and plan.md's T14
- * Done note.
+ * synthetic band, not estimator accuracy.
+ *
+ * Review #3, C5: that finding used to live only in this comment and the
+ * commit message — `ruflo variance`'s own output printed the bare
+ * `100.0%` as its first line, with nothing pointing a reader at this
+ * doc. Fixed structurally, not just in prose: every `actuals` record now
+ * carries a required `source: 'proxy' | 'measured'` (T13/C3), so this
+ * module can tell a self-consistent proxy comparison from a real one and
+ * says so in the report itself — `hitRateCaveat` fires whenever ANY
+ * proxy row is mixed into the headline `hitRate`, and `measuredHitRate`/
+ * `measuredSampleSize` give the honest number computed ONLY from rows
+ * that were actually metered (zero today, on this repo's own records —
+ * an honest zero, not a hidden one). The CLI prints the caveat before,
+ * not after, the headline number.
  *
  * @module estimator/variance
  */
@@ -48,6 +59,8 @@ export interface TaskVariance {
   actualCostUsd: number;
   hit: boolean;
   createdAt: string;
+  /** Whether this task's actuals were really metered or a proxy approximation — see module doc. */
+  actualsSource: 'proxy' | 'measured';
 }
 
 export interface SkippedTask {
@@ -72,6 +85,12 @@ export interface VarianceReport {
   /** Hits / sampleSize. 0 (not NaN) when sampleSize is 0 — see buildVarianceReport's own doc. */
   hitRate: number;
   trend: TrendPoint[];
+  /** Sample size counting only rows whose actuals were really metered — never includes a proxy row. */
+  measuredSampleSize: number;
+  /** Hit rate computed ONLY from measured rows. 0 when measuredSampleSize is 0 — the honest number to read when hitRateCaveat is set. */
+  measuredHitRate: number;
+  /** Set whenever ANY proxy row is mixed into the headline hitRate above — undefined only when the whole sample is measured. Meant to be shown to a stakeholder BEFORE the bare hitRate, not after. */
+  hitRateCaveat?: string;
 }
 
 function loadAllTasks(repoRoot: string): Task[] {
@@ -119,12 +138,24 @@ export function buildVarianceReport(repoRoot: string): VarianceReport {
       actualCostUsd: task.actuals.costUsd,
       hit: actualTokens >= task.estimate.lowTokens && actualTokens <= task.estimate.highTokens,
       createdAt: task.createdAt,
+      actualsSource: task.actuals.source,
     });
   }
 
   const sampleSize = perTask.length;
   const hits = perTask.filter((t) => t.hit).length;
   const hitRate = sampleSize > 0 ? hits / sampleSize : 0;
+
+  const measured = perTask.filter((t) => t.actualsSource === 'measured');
+  const measuredSampleSize = measured.length;
+  const measuredHits = measured.filter((t) => t.hit).length;
+  const measuredHitRate = measuredSampleSize > 0 ? measuredHits / measuredSampleSize : 0;
+  const proxyCount = sampleSize - measuredSampleSize;
+  const hitRateCaveat = proxyCount > 0
+    ? (measuredSampleSize > 0
+        ? `${proxyCount} of ${sampleSize} task(s) behind this hit rate are proxy-only (self-consistent by construction, not real accuracy) — the measured-only rate is ${(measuredHitRate * 100).toFixed(1)}% over ${measuredSampleSize} task(s)`
+        : `all ${sampleSize} task(s) behind this hit rate are proxy-only (T8's calibration pilot) — this compares each task's synthetic estimate band to itself, not real estimator accuracy; see estimator-holdout-check.mjs's real 75.0% hold-out figure instead`)
+    : undefined;
 
   const chronological = [...perTask].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   let cumulativeHits = 0;
@@ -134,5 +165,5 @@ export function buildVarianceReport(repoRoot: string): VarianceReport {
     return { taskId: t.taskId, createdAt: t.createdAt, hit: t.hit, cumulativeSampleSize, cumulativeHitRate: cumulativeHits / cumulativeSampleSize };
   });
 
-  return { perTask, skipped, sampleSize, hitRate, trend };
+  return { perTask, skipped, sampleSize, hitRate, trend, measuredSampleSize, measuredHitRate, ...(hitRateCaveat ? { hitRateCaveat } : {}) };
 }

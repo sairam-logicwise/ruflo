@@ -17,17 +17,24 @@
  * input, the same reasoning predict.ts's own doc comment gives for not
  * averaging away a wide token spread into a falsely tight range.
  *
- * Pricing reuses model-prices.ts's existing `blendedPrice()`. predict.ts
- * (T10) returns one combined input+output token total per range edge —
- * `complexity` is the only dimension it tracks (its own module doc) —
- * so there is no real per-task input/output split to price with
- * `costUsd()` directly. `blendedPrice(modelId)` already IS this repo's
- * stated "no real split, use the KRR trainer's 1x-input + 3x-output mix"
- * assumption; reusing it means `quote`'s price is one Mtok-rate away
- * from a raw token count: `tokens * blendedPrice(modelId) / 4_000_000`
- * (blendedPrice = 1×p.in + 3×p.out per Mtok, i.e. the $ for 4 "mix
- * units" of that ratio). A stated assumption, not a measured split —
- * named in the output per this task's own acceptance criterion.
+ * Pricing (fixed, review #3 C4): T10's `predictTokens()` now returns the
+ * REAL input/output split from whichever neighbour row actually set each
+ * edge of the range (`lowInputTokens`/`lowOutputTokens`/
+ * `highInputTokens`/`highOutputTokens` on `Estimate`) — summed across
+ * every predicted task, then priced with `costUsd()`'s real per-model
+ * input/output rates. The earlier version priced the combined total with
+ * `blendedPrice()`'s hardcoded 1x-input/3x-output mix, which over-priced
+ * this corpus's real ~93.5%-input/6.5%-output split by 3.17x — confirmed
+ * by execution, not a hypothetical.
+ *
+ * C3: a quote also refuses to state a dollar figure at all unless the
+ * corpus behind it contains at least one row whose cost was REALLY
+ * metered (`EstimatorRow.measured`), never only proxy-approximated rows
+ * (T8's calibration pilot, before any real `usage` object existed for
+ * this session). `lowCostUsd`/`highCostUsd` are `undefined` — not a
+ * silently-computed-anyway number — until that's true; the token range
+ * itself is unaffected, since a token range never depended on cost data
+ * being measured in the first place.
  *
  * @module estimator/quote
  */
@@ -38,7 +45,7 @@ import { parseRecordFile, validateRecord, type Task, type Requirement } from '@c
 import { extractFeatures } from './features.js';
 import { predictTokens, type EstimatorRow } from './predict.js';
 import { loadCalibrationRows, loadEstimatorCorpus, buildUnifiedCorpus } from './corpus.js';
-import { blendedPrice } from '../model-prices.js';
+import { costUsd } from '../model-prices.js';
 
 /** Default pricing reference — the same "nearest real proxy, coarse tier" fallback T8's calibration pilot used, since this session's own real model has no MODEL_PRICES entry. */
 const DEFAULT_PRICE_ID = 'sonnet';
@@ -62,8 +69,9 @@ export interface Quote {
   requirementTitle: string;
   lowTokens: number;
   highTokens: number;
-  lowCostUsd: number;
-  highCostUsd: number;
+  /** C3: undefined — never a silently-computed number — until the corpus behind this quote has at least one really-metered row. See `assumptions.hasMeasuredData`/`costCaveat`. */
+  lowCostUsd: number | undefined;
+  highCostUsd: number | undefined;
   /** MIN confidence across every predicted task — see module doc. */
   confidence: number;
   taskCount: number;
@@ -77,6 +85,10 @@ export interface Quote {
     neighborCount: number;
     priceId: string;
     pricingModel: string;
+    /** C3: does the corpus behind this quote contain any REALLY metered row (EstimatorRow.measured)? false means every dollar figure was withheld, not guessed. */
+    hasMeasuredData: boolean;
+    /** Present only when hasMeasuredData is false — the reason no cost figure is given, meant to be shown to a stakeholder directly. */
+    costCaveat?: string;
   };
 }
 
@@ -159,12 +171,17 @@ export function quoteRequirement(repoRoot: string, requirementId: string, opts: 
 
   const corpus = buildRealCorpus(repoRoot, opts.graphPath);
   const priceId = opts.priceId ?? DEFAULT_PRICE_ID;
-  const rate = blendedPrice(priceId); // throws UnknownModelPriceError on a bad --price-id — same fail-loud contract as costUsd
+  costUsd(priceId, 1, 1); // throws UnknownModelPriceError on a bad --price-id, eagerly — same fail-loud contract as before, regardless of whether a cost figure ends up quoted
+  const hasMeasuredData = corpus.some((row) => row.measured);
 
   const perTask: TaskQuote[] = [];
   const unpredictedTasks: UnpredictedTask[] = [];
   let lowTokens = 0;
   let highTokens = 0;
+  let lowInputTokens = 0;
+  let lowOutputTokens = 0;
+  let highInputTokens = 0;
+  let highOutputTokens = 0;
   let retryMultiplier = 1.3;
   let neighborCount = 0;
 
@@ -191,6 +208,10 @@ export function quoteRequirement(repoRoot: string, requirementId: string, opts: 
     neighborCount = estimate.neighborCount;
     lowTokens += estimate.lowTokens;
     highTokens += estimate.highTokens;
+    lowInputTokens += estimate.lowInputTokens;
+    lowOutputTokens += estimate.lowOutputTokens;
+    highInputTokens += estimate.highInputTokens;
+    highOutputTokens += estimate.highOutputTokens;
     perTask.push({ taskId: task.id, title: task.title, lowTokens: estimate.lowTokens, highTokens: estimate.highTokens, confidence: estimate.confidence });
   }
 
@@ -203,6 +224,12 @@ export function quoteRequirement(repoRoot: string, requirementId: string, opts: 
 
   const confidence = Math.min(...perTask.map((t) => t.confidence));
 
+  // C3: withhold a dollar figure entirely rather than price a corpus that
+  // has never actually measured a real cost — see module doc.
+  const costCaveat = hasMeasuredData
+    ? undefined
+    : `no measured cost data yet — every actuals row behind this quote is a proxy approximation (T8's calibration pilot); a token range is still real, a dollar figure would not be`;
+
   return {
     ok: true,
     quote: {
@@ -210,18 +237,20 @@ export function quoteRequirement(repoRoot: string, requirementId: string, opts: 
       requirementTitle: requirement.title,
       lowTokens,
       highTokens,
-      lowCostUsd: (lowTokens * rate) / 4_000_000,
-      highCostUsd: (highTokens * rate) / 4_000_000,
+      lowCostUsd: hasMeasuredData ? costUsd(priceId, lowInputTokens, lowOutputTokens) : undefined,
+      highCostUsd: hasMeasuredData ? costUsd(priceId, highInputTokens, highOutputTokens) : undefined,
       confidence,
       taskCount: tasks.length,
       perTask,
       unpredictedTasks,
       assumptions: {
+        hasMeasuredData,
+        ...(costCaveat ? { costCaveat } : {}),
         retryMultiplier,
         corpusSize: corpus.length,
         neighborCount,
         priceId,
-        pricingModel: 'blended 1x-input + 3x-output rate (model-prices.ts blendedPrice) — no real per-task input/output split available from predict.ts',
+        pricingModel: 'real per-model input/output rates (model-prices.ts costUsd), split by the actual neighbour rows predictTokens used — not a blended/assumed ratio',
       },
     },
   };
@@ -236,11 +265,14 @@ export function quoteRequirement(repoRoot: string, requirementId: string, opts: 
 export interface BacklogQuote {
   lowTokens: number;
   highTokens: number;
-  lowCostUsd: number;
-  highCostUsd: number;
+  /** C3: undefined only when NOT ONE requirement quote in this backlog has measured cost data. Otherwise sums whichever quotes do — see requirementsWithoutMeasuredCost for what was excluded. */
+  lowCostUsd: number | undefined;
+  highCostUsd: number | undefined;
   confidence: number;
   requirementQuotes: Quote[];
   skippedRequirements: { requirementId: string; reason: string }[];
+  /** Requirement ids counted in lowTokens/highTokens but excluded from lowCostUsd/highCostUsd — that specific quote had no measured cost data. Named, never silently folded into the total as if it were priced. */
+  requirementsWithoutMeasuredCost: string[];
 }
 
 export function quoteBacklog(repoRoot: string, requirementIds: string[], opts: QuoteOptions = {}): BacklogQuote {
@@ -256,13 +288,16 @@ export function quoteBacklog(repoRoot: string, requirementIds: string[], opts: Q
     }
   }
 
+  const pricedQuotes = requirementQuotes.filter((q) => q.lowCostUsd !== undefined);
+  const requirementsWithoutMeasuredCost = requirementQuotes.filter((q) => q.lowCostUsd === undefined).map((q) => q.requirementId);
+  const lowCostUsd = pricedQuotes.length > 0 ? pricedQuotes.reduce((sum, q) => sum + (q.lowCostUsd ?? 0), 0) : undefined;
+  const highCostUsd = pricedQuotes.length > 0 ? pricedQuotes.reduce((sum, q) => sum + (q.highCostUsd ?? 0), 0) : undefined;
+
   const lowTokens = requirementQuotes.reduce((sum, q) => sum + q.lowTokens, 0);
   const highTokens = requirementQuotes.reduce((sum, q) => sum + q.highTokens, 0);
-  const lowCostUsd = requirementQuotes.reduce((sum, q) => sum + q.lowCostUsd, 0);
-  const highCostUsd = requirementQuotes.reduce((sum, q) => sum + q.highCostUsd, 0);
   const confidence = requirementQuotes.length > 0 ? Math.min(...requirementQuotes.map((q) => q.confidence)) : 0;
 
-  return { lowTokens, highTokens, lowCostUsd, highCostUsd, confidence, requirementQuotes, skippedRequirements };
+  return { lowTokens, highTokens, lowCostUsd, highCostUsd, confidence, requirementQuotes, skippedRequirements, requirementsWithoutMeasuredCost };
 }
 
 /** Every requirement id currently on disk — the `--backlog` default (quote everything) before any filter is applied. */

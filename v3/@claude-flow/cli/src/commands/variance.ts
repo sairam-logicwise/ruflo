@@ -16,13 +16,19 @@ function pct(n: number): string {
 }
 
 function printReport(report: VarianceReport): void {
+  // C5: the caveat, when there is one, prints BEFORE the headline number —
+  // the whole point is that a bare hit rate was the first, and only, thing
+  // a stakeholder used to see.
+  if (report.hitRateCaveat) {
+    output.writeln(`⚠ ${report.hitRateCaveat}`);
+  }
   output.writeln(`Variance: ${report.perTask.filter((t) => t.hit).length}/${report.sampleSize} within quoted range (${pct(report.hitRate)} hit rate)`);
   if (report.sampleSize === 0) {
     output.writeln('  No task carries both an estimate and actuals yet — nothing to compare.');
   }
   output.writeln('Per-task:');
   for (const t of report.perTask) {
-    output.writeln(`  ${t.taskId} (${t.title}): quoted ${t.lowTokens}-${t.highTokens}, actual ${t.actualTokens} ($${t.actualCostUsd.toFixed(4)}) — ${t.hit ? 'HIT' : 'MISS'}`);
+    output.writeln(`  ${t.taskId} (${t.title}): quoted ${t.lowTokens}-${t.highTokens}, actual ${t.actualTokens} ($${t.actualCostUsd.toFixed(4)}) — ${t.hit ? 'HIT' : 'MISS'} [${t.actualsSource}]`);
   }
   if (report.trend.length > 0) {
     output.writeln('Trend (chronological, cumulative — a small early sample reads as exactly that):');

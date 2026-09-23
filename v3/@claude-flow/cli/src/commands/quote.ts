@@ -17,8 +17,10 @@ import { output } from '../output.js';
 import { quoteRequirement, quoteBacklog, listAllRequirementIds, type Quote, type BacklogQuote, type QuoteOptions } from '../ruvector/estimator/quote.js';
 import { UnknownModelPriceError } from '../ruvector/model-prices.js';
 
-function formatUsd(n: number): string {
-  return `$${n.toFixed(2)}`;
+/** C3: undefined means no measured cost data exists yet — never printed as $0.00 or omitted silently. */
+function formatCostRange(low: number | undefined, high: number | undefined): string {
+  if (low === undefined || high === undefined) return 'no measured cost data yet';
+  return `$${low.toFixed(2)}-$${high.toFixed(2)}`;
 }
 
 /** Fixed 'en-US' grouping — plain toLocaleString() follows the host's locale (verified: an en-IN host renders 153562 as "1,53,562"), which would make this output non-deterministic across machines. */
@@ -28,7 +30,8 @@ function formatTokens(n: number): string {
 
 function printQuote(q: Quote): void {
   output.writeln(`${q.requirementId} — ${q.requirementTitle}`);
-  output.writeln(`  Range: ${formatTokens(q.lowTokens)}-${formatTokens(q.highTokens)} tokens (${formatUsd(q.lowCostUsd)}-${formatUsd(q.highCostUsd)})`);
+  output.writeln(`  Range: ${formatTokens(q.lowTokens)}-${formatTokens(q.highTokens)} tokens (${formatCostRange(q.lowCostUsd, q.highCostUsd)})`);
+  if (q.assumptions.costCaveat) output.writeln(`  ⚠ ${q.assumptions.costCaveat}`);
   output.writeln(`  Confidence: ${q.confidence.toFixed(2)} (weakest of ${q.perTask.length} estimated task(s))`);
   output.writeln(`  Assumptions: retry multiplier ${q.assumptions.retryMultiplier}x, corpus size ${q.assumptions.corpusSize}, ${q.assumptions.neighborCount} neighbour(s), priced against "${q.assumptions.priceId}" (${q.assumptions.pricingModel})`);
   output.writeln(`  Per-task breakdown:`);
@@ -45,7 +48,10 @@ function printQuote(q: Quote): void {
 
 function printBacklog(b: BacklogQuote): void {
   output.writeln(`Backlog quote across ${b.requirementQuotes.length} requirement(s):`);
-  output.writeln(`  Range: ${formatTokens(b.lowTokens)}-${formatTokens(b.highTokens)} tokens (${formatUsd(b.lowCostUsd)}-${formatUsd(b.highCostUsd)})`);
+  output.writeln(`  Range: ${formatTokens(b.lowTokens)}-${formatTokens(b.highTokens)} tokens (${formatCostRange(b.lowCostUsd, b.highCostUsd)})`);
+  if (b.requirementsWithoutMeasuredCost.length > 0) {
+    output.writeln(`  ⚠ excluded from the cost total above (no measured cost data): ${b.requirementsWithoutMeasuredCost.join(', ')}`);
+  }
   output.writeln(`  Confidence: ${b.confidence.toFixed(2)} (weakest of ${b.requirementQuotes.length} requirement quote(s))`);
   output.writeln('');
   for (const q of b.requirementQuotes) printQuote(q);

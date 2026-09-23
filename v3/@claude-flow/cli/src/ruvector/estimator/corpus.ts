@@ -270,6 +270,7 @@ export function loadCalibrationRows(repoRoot: string, graphPath?: string): Estim
       inputTokens: task.actuals.inputTokens,
       outputTokens: task.actuals.outputTokens,
       source: 'calibration',
+      measured: task.actuals.source === 'measured',
     });
   }
   return rows;
@@ -291,6 +292,10 @@ export function buildUnifiedCorpus(trajectoryRows: CorpusRow[], calibrationRows:
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
     source: 'trajectory',
+    // Always real: buildEstimatorCorpus's own Important-7 exclusion
+    // already refuses any row without real, nonzero input AND output
+    // tokens from the router's own captured outcome — never a proxy.
+    measured: true,
   }));
   return [...fromTrajectory, ...calibrationRows];
 }

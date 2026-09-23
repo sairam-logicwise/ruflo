@@ -28,6 +28,16 @@ export interface EstimatorRow {
   outputTokens: number;
   /** T7's trajectory log is a prior from a different domain (plan.md's own words); T8's calibration set is real, in-domain ground truth. Kept, not used to filter — a caller can weight or report by source if it wants to. */
   source: 'trajectory' | 'calibration';
+  /**
+   * Review #3, C3: was this row's cost really metered, or a proxy
+   * approximation? Trajectory rows are always real router production
+   * outcomes (always `true`); a calibration row's value comes straight
+   * from its originating task record's `actuals.source`. `quote.ts` and
+   * `variance.ts` both refuse to present a dollar figure or a hit rate as
+   * authoritative when nothing in the corpus/sample is actually
+   * `measured` — see their own module docs.
+   */
+  measured: boolean;
 }
 
 export interface PredictOptions {
@@ -49,6 +59,22 @@ export interface PredictOptions {
 export interface Estimate {
   lowTokens: number;
   highTokens: number;
+  /**
+   * Review #3, C4: `lowTokens`/`highTokens` are a combined total with no
+   * split — a caller pricing them needed to GUESS an input:output ratio,
+   * and `quote.ts` guessed a hardcoded 1x-input/3x-output mix that turned
+   * out 3.17x too expensive against this corpus's real ~93.5%-input mix.
+   * These four fields are the REAL split from the actual neighbour rows
+   * that produced `lowTokens`/`highTokens` — not a blended average across
+   * every neighbour, the exact real ratio from the specific real task
+   * that set each edge of the range. `highInputTokens`/`highOutputTokens`
+   * scale both sides of that real ratio by `retryMultiplier` together
+   * (a retry/repair round plausibly costs more on both sides, not one).
+   */
+  lowInputTokens: number;
+  lowOutputTokens: number;
+  highInputTokens: number;
+  highOutputTokens: number;
   /** 0-1. A heuristic, not a statistical confidence interval — see computeConfidence()'s own doc comment for exactly what it is and is not. */
   confidence: number;
   neighborCount: number;
@@ -132,6 +158,17 @@ export function predictTokens(complexityScore: number, corpus: EstimatorRow[], o
   const highTokens = Math.round(Math.max(...totals) * retryMultiplier);
   const confidence = computeConfidence(neighbors.length, k, avgDistance, totals);
 
+  // C4: the real neighbour rows that set each edge — their OWN real
+  // input:output split, not a blended guess. `reduce` picks the FIRST
+  // row on a tie, same "deterministic, not special-cased" reasoning as
+  // everything else here.
+  const lowNeighbor = neighbors.reduce((a, b) => (a.row.inputTokens + a.row.outputTokens <= b.row.inputTokens + b.row.outputTokens ? a : b));
+  const highNeighbor = neighbors.reduce((a, b) => (a.row.inputTokens + a.row.outputTokens >= b.row.inputTokens + b.row.outputTokens ? a : b));
+  const lowInputTokens = lowNeighbor.row.inputTokens;
+  const lowOutputTokens = lowNeighbor.row.outputTokens;
+  const highInputTokens = Math.round(highNeighbor.row.inputTokens * retryMultiplier);
+  const highOutputTokens = Math.round(highNeighbor.row.outputTokens * retryMultiplier);
+
   const bySource = { trajectory: 0, calibration: 0 };
   for (const n of neighbors) bySource[n.row.source]++;
 
@@ -140,6 +177,10 @@ export function predictTokens(complexityScore: number, corpus: EstimatorRow[], o
     estimate: {
       lowTokens,
       highTokens,
+      lowInputTokens,
+      lowOutputTokens,
+      highInputTokens,
+      highOutputTokens,
       confidence,
       neighborCount: neighbors.length,
       corpusSize: corpus.length,

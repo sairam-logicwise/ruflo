@@ -169,6 +169,12 @@ export function buildRepairActuals(repairResult: RepairLoopResult): Actuals | un
     inputTokens: repairResult.totalInputTokens,
     outputTokens: repairResult.totalOutputTokens,
     costUsd: repairResult.totalCostUsd,
+    // Review #3, C3/Important 11: real repair spend is measured, never a
+    // proxy — plan.model is the actual tier this round billed against
+    // (structurally always set alongside real usage; the fallback is
+    // defensive typing, not a reachable path).
+    source: 'measured',
+    priceModel: repairResult.plan?.model ?? 'unknown',
   };
 }
 

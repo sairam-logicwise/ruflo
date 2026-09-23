@@ -107,6 +107,44 @@ describe('predictTokens', () => {
     }
   });
 
+  // Review #3, C4: lowTokens/highTokens are a combined total; quote.ts
+  // needs the real input:output split to price correctly instead of
+  // guessing a fixed ratio.
+  describe('real input/output split (C4)', () => {
+    it('reports the real split from the neighbour that set the low edge', () => {
+      const corpus = [row(0.5, 700, 300), row(0.5, 900, 600)]; // totals 1000, 1500
+      const result = predictTokens(0.5, corpus, { retryMultiplier: 1 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.estimate.lowTokens).toBe(1000);
+        expect(result.estimate.lowInputTokens).toBe(700);
+        expect(result.estimate.lowOutputTokens).toBe(300);
+      }
+    });
+
+    it('scales the high edge split by the retry multiplier, on both sides', () => {
+      const corpus = [row(0.5, 700, 300), row(0.5, 900, 600)]; // totals 1000, 1500
+      const result = predictTokens(0.5, corpus, { retryMultiplier: 2 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.estimate.highTokens).toBe(3000); // 1500 * 2
+        expect(result.estimate.highInputTokens).toBe(1800); // 900 * 2
+        expect(result.estimate.highOutputTokens).toBe(1200); // 600 * 2
+      }
+    });
+
+    it('never guesses a ratio — the low and high splits can genuinely differ from each other', () => {
+      // A 90/10 low neighbour and a 20/80 high neighbour — a fixed blend would erase this.
+      const corpus = [row(0.5, 900, 100), row(0.5, 200, 800)]; // totals 1000, 1000 — same total, different mix
+      const result = predictTokens(0.5, corpus, { retryMultiplier: 1, k: 1 });
+      // With k:1, only the nearer-complexity neighbour is used (both are complexity 0.5, tie -> first).
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.estimate.lowInputTokens + result.estimate.lowOutputTokens).toBe(result.estimate.lowTokens);
+      }
+    });
+  });
+
   it('picks neighbours by nearest complexity distance, not corpus order', () => {
     const corpus = [row(0.9, 9000, 9000), row(0.5, 1000, 500), row(0.1, 100, 50)];
     const result = predictTokens(0.5, corpus, { k: 1, retryMultiplier: 1 });

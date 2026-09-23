@@ -266,12 +266,21 @@ describe('loadCalibrationRows', () => {
   });
 
   it('reads a real task record with actuals into a calibration row', () => {
-    writeTaskFile('TASK-001-x.md', { actuals: { inputTokens: 1000, outputTokens: 500, costUsd: 0.01 } });
+    writeTaskFile('TASK-001-x.md', { actuals: { inputTokens: 1000, outputTokens: 500, costUsd: 0.01, source: 'measured', priceModel: 'anthropic/claude-sonnet-4-6' } });
     const rows = loadCalibrationRows(repoRoot);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ inputTokens: 1000, outputTokens: 500, source: 'calibration' });
+    expect(rows[0]).toMatchObject({ inputTokens: 1000, outputTokens: 500, source: 'calibration', measured: true });
     expect(rows[0].complexity).toBeGreaterThanOrEqual(0);
     expect(rows[0].complexity).toBeLessThanOrEqual(1);
+  });
+
+  // Review #3, C3: a calibration row must say whether its cost was really
+  // metered or a proxy — quote.ts/variance.ts both refuse to treat a
+  // proxy-only corpus as if it measured anything.
+  it('carries the real measured/proxy distinction through from actuals.source', () => {
+    writeTaskFile('TASK-001-x.md', { actuals: { inputTokens: 1000, outputTokens: 500, costUsd: 0.01, source: 'proxy', priceModel: 'anthropic/claude-sonnet-4-6' } });
+    const rows = loadCalibrationRows(repoRoot);
+    expect(rows[0].measured).toBe(false);
   });
 
   it('skips a task record with no actuals — nothing to teach the estimator', () => {
@@ -281,7 +290,7 @@ describe('loadCalibrationRows', () => {
 
   it('skips a record that does not validate, without crashing the rest of the scan', () => {
     writeFileSync(join(tasksDir, 'TASK-001-broken.md'), '---\nid: TASK-001\nstatus: not-a-real-status\n---\n\nbroken\n');
-    writeTaskFile('TASK-002-x.md', { id: 'TASK-002', actuals: { inputTokens: 500, outputTokens: 200, costUsd: 0.005 } });
+    writeTaskFile('TASK-002-x.md', { id: 'TASK-002', actuals: { inputTokens: 500, outputTokens: 200, costUsd: 0.005, source: 'proxy', priceModel: 'anthropic/claude-sonnet-4-6' } });
     const rows = loadCalibrationRows(repoRoot);
     expect(rows).toHaveLength(1);
   });

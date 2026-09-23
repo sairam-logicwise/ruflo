@@ -28,7 +28,10 @@ describe('variance.ts', () => {
     title?: string;
     createdAt?: string;
     estimate?: { lowTokens: number; highTokens: number; confidence: number };
-    actuals?: { inputTokens: number; outputTokens: number; costUsd: number };
+    // 'measured' by default — most of these tests are about hit/miss and
+    // trend logic, not the proxy-vs-measured caveat (which has its own
+    // dedicated tests below).
+    actuals?: { inputTokens: number; outputTokens: number; costUsd: number; source?: 'proxy' | 'measured' };
   } = {}): void {
     const title = opts.title ?? `Task ${id}`;
     const body = `# ${title}\n\nA plain task body.\n`;
@@ -39,7 +42,7 @@ describe('variance.ts', () => {
       citations: ['REQ-999'], dependsOn: [],
       contentHash: computeContentHash(body), provenance: 'agent-inferred',
       ...(opts.estimate ? { estimate: opts.estimate } : {}),
-      ...(opts.actuals ? { actuals: opts.actuals } : {}),
+      ...(opts.actuals ? { actuals: { source: 'measured', priceModel: 'anthropic/claude-sonnet-4-6', ...opts.actuals } } : {}),
     };
     writeFileSync(join(taskDir, `${id}-x.md`), serializeRecordFile(frontmatter, body));
   }
@@ -99,6 +102,38 @@ describe('variance.ts', () => {
     writeTask('TASK-001');
     const report = buildVarianceReport(repoRoot);
     expect(report.skipped[0].reason).toBe('no estimate and actuals recorded');
+  });
+
+  // Review #3, C5: the caveat and the measured-only alternative number.
+  describe('proxy-vs-measured caveat (C5)', () => {
+    it('sets no caveat, and reports the full hit rate as the measured rate too, when every row is measured', () => {
+      writeTask('TASK-001', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 150, outputTokens: 0, costUsd: 0.001, source: 'measured' } });
+      const report = buildVarianceReport(repoRoot);
+      expect(report.hitRateCaveat).toBeUndefined();
+      expect(report.measuredSampleSize).toBe(1);
+      expect(report.measuredHitRate).toBe(report.hitRate);
+    });
+
+    it('sets a strong caveat naming the real hold-out figure when EVERY row is proxy-only', () => {
+      writeTask('TASK-001', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 150, outputTokens: 0, costUsd: 0.001, source: 'proxy' } });
+      writeTask('TASK-002', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 150, outputTokens: 0, costUsd: 0.001, source: 'proxy' } });
+      const report = buildVarianceReport(repoRoot);
+      expect(report.hitRateCaveat).toMatch(/all 2 task\(s\)/);
+      expect(report.hitRateCaveat).toMatch(/75\.0%/); // points at the real hold-out figure, not just "be careful"
+      expect(report.measuredSampleSize).toBe(0);
+      expect(report.measuredHitRate).toBe(0); // an honest zero, not a fabricated number
+    });
+
+    it('sets a proportional caveat and a real measured-only rate when the sample is mixed', () => {
+      writeTask('TASK-001', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 150, outputTokens: 0, costUsd: 0.001, source: 'measured' } }); // hit, measured
+      writeTask('TASK-002', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 500, outputTokens: 0, costUsd: 0.001, source: 'measured' } }); // miss, measured
+      writeTask('TASK-003', { estimate: { lowTokens: 100, highTokens: 200, confidence: 0.5 }, actuals: { inputTokens: 150, outputTokens: 0, costUsd: 0.001, source: 'proxy' } }); // hit, proxy
+      const report = buildVarianceReport(repoRoot);
+      expect(report.hitRateCaveat).toMatch(/1 of 3 task\(s\)/);
+      expect(report.measuredSampleSize).toBe(2);
+      expect(report.measuredHitRate).toBeCloseTo(0.5); // 1 hit / 2 measured — the proxy hit is excluded
+      expect(report.hitRate).toBeCloseTo(2 / 3); // the (caveated) headline still counts all 3
+    });
   });
 
   it('computes the aggregate hit rate across a mix of hits and misses', () => {

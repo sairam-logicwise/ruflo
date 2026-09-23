@@ -86,11 +86,34 @@ describe('record schema — valid record', () => {
     const result = TaskSchema.safeParse(
       validTask({
         estimate: { lowTokens: 1000, highTokens: 5000, confidence: 0.6 },
-        actuals: { inputTokens: 2000, outputTokens: 800, costUsd: 0.012 },
+        actuals: { inputTokens: 2000, outputTokens: 800, costUsd: 0.012, source: 'measured', priceModel: 'anthropic/claude-sonnet-4-6' },
         doneCriteria: { testLayers: ['unit', 'integration'], coverageThreshold: 80 },
       }),
     );
     expect(result.success).toBe(true);
+  });
+
+  // Review #3, C3/Important 11: actuals must declare whether a cost
+  // figure was really metered or approximated — required, not optional.
+  it('rejects actuals missing source or priceModel', () => {
+    const missingSource = TaskSchema.safeParse(
+      validTask({ actuals: { inputTokens: 100, outputTokens: 50, costUsd: 0.001, priceModel: 'anthropic/claude-sonnet-4-6' } }),
+    );
+    expect(missingSource.success).toBe(false);
+
+    const missingPriceModel = TaskSchema.safeParse(
+      validTask({ actuals: { inputTokens: 100, outputTokens: 50, costUsd: 0.001, source: 'measured' } }),
+    );
+    expect(missingPriceModel.success).toBe(false);
+  });
+
+  it('accepts both real actuals sources: proxy and measured', () => {
+    for (const source of ['proxy', 'measured'] as const) {
+      const result = TaskSchema.safeParse(
+        validTask({ actuals: { inputTokens: 100, outputTokens: 50, costUsd: 0.001, source, priceModel: 'anthropic/claude-sonnet-4-6' } }),
+      );
+      expect(result.success).toBe(true);
+    }
   });
 });
 

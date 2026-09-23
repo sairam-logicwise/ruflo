@@ -18,6 +18,8 @@ actuals:
   inputTokens: 983
   outputTokens: 231
   costUsd: 0.006414
+  source: proxy
+  priceModel: anthropic/claude-sonnet-4-6
 contentHash: d50f515689dc85a2962fc86dec275894ea56af0a299bd1d2b8d521df1239e4a4
 provenance: agent-inferred
 ---

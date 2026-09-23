@@ -126,20 +126,31 @@ describe('parseProposals', () => {
   });
 });
 
+// Review #3, C1-adjacent finding: no opts here means extractFeatures()
+// falls back to `process.cwd()` for the graph path, and this real
+// monorepo has a DIFFERENT real graphify-out/graph.json at the repo
+// root, at v3/, and at v3/@claude-flow/cli/ — whichever one the test
+// runner's cwd happens to resolve to. That made 'no layer suggested'
+// genuinely ambient-state-dependent (passed from one cwd, failed from
+// another). A deliberately nonexistent graphPath makes every case here
+// independent of where vitest is invoked from — loadGraph() already
+// degrades a missing path to "no grounding", not a throw.
+const NO_GRAPH = { graphPath: '/nonexistent-graph-for-test-isolation.json' };
+
 describe('inferDoneCriteria (T18)', () => {
   it('reuses T9\'s test-layer detection — picks up an explicit mention in the task text', () => {
-    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.');
+    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.', NO_GRAPH);
     expect(dc.testLayers).toContain('integration');
     expect(dc.testLayers).toContain('e2e');
   });
 
   it('returns an empty testLayers list, not a fabricated default, when nothing suggests a layer', () => {
-    const dc = inferDoneCriteria('Update the README wording', 'Fix a typo.');
+    const dc = inferDoneCriteria('Update the README wording', 'Fix a typo.', NO_GRAPH);
     expect(dc.testLayers).toEqual([]);
   });
 
   it('never sets a coverageThreshold — that is a per-task human choice, not an inferred default', () => {
-    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.');
+    const dc = inferDoneCriteria('Add an integration test', 'Also needs an end-to-end check.', NO_GRAPH);
     expect(dc.coverageThreshold).toBeUndefined();
   });
 });

@@ -48,12 +48,29 @@ export const EstimateSchema = z
   });
 export type Estimate = z.infer<typeof EstimateSchema>;
 
-/** T13: actual token/cost consumption, captured when the task completes. */
+/**
+ * T13: actual token/cost consumption, captured when the task completes.
+ *
+ * Review #3, C3/Important 11: `source` and `priceModel` are REQUIRED, not
+ * optional — an actuals row with unstated provenance is exactly the kind
+ * of silent ambiguity this schema exists to prevent. `source: 'proxy'`
+ * means the number was approximated (e.g. T8's calibration pilot,
+ * tokenizer-counted and priced against a stand-in model because no real
+ * `usage` object existed for that run); `source: 'measured'` means it
+ * came from a real, metered call (e.g. T13's repair-loop capture, from
+ * `claude -p`'s own real `usage` block). The two must never be silently
+ * mixed in anything that reports accuracy — see `quote.ts` and
+ * `variance.ts`, which both refuse to treat a proxy-only corpus as if it
+ * measured anything.
+ */
 export const ActualsSchema = z
   .object({
     inputTokens: z.number().nonnegative(),
     outputTokens: z.number().nonnegative(),
     costUsd: z.number().nonnegative(),
+    source: z.enum(['proxy', 'measured']),
+    /** model-prices.ts id these costUsd figures were priced against — lets a caller distinguish "priced against a stand-in tier" from "this is what was actually billed". */
+    priceModel: z.string().min(1),
   })
   .strict();
 export type Actuals = z.infer<typeof ActualsSchema>;
