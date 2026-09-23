@@ -1,8 +1,17 @@
 # Handover: Tool-Neutral Agentic SDLC
 
 **For:** a session or engineer starting cold on this repo
-**Written:** 2026-09-18
-**State:** planning complete and approved. No implementation code written yet.
+**Written:** 2026-09-18. **Updated:** 2026-09-23 — all 26 tasks implemented.
+**State:** implementation **complete**. All 26 tasks across all 10 phases
+are done, tested, and committed — see [todo.md](./todo.md) for the
+day-by-day narrative and [plan.md](./plan.md) for each task's own
+"Done" write-up (acceptance criteria checked, what was verified, and
+every honest finding surfaced along the way, including ones that don't
+flatter the result). **Section 9 below is new** and is probably the
+most load-bearing thing to read if you are picking this repo up cold:
+several tasks (T6's real quality pass, T8, T24) needed a real LLM call
+and none of this work ever had one available — read it before assuming
+anything here required a paid API key.
 
 Read this file, then [todo.md](./todo.md), then [plan.md](./plan.md) for task detail.
 
@@ -60,11 +69,11 @@ Five parallel audits found that ruflo's mechanisms are often written correctly a
 - `ContinueGate` — only consumer is its own test.
 
 **Default-off or wrong-by-default:**
-- `AgenticPolicyEngine` defaults to `legacy` mode, which **forces `enforcedOutcome: 'allowed'`** regardless of the decision — `v3/@claude-flow/security/src/policy/evaluator.ts:124`. **T16 must change this default or the gate is a no-op.**
+- `AgenticPolicyEngine` defaults to `legacy` mode, which **forces `enforcedOutcome: 'allowed'`** regardless of the decision — `v3/@claude-flow/security/src/policy/evaluator.ts:124`. This is a SITEWIDE chokepoint for the entire CLI/MCP surface (ADR-324), not scoped to this plan — **T16 deliberately did NOT change it** (confirmed with the user first); the gate instead landed as its own always-on precondition check independent of this engine's mode. See plan.md's T16 Done note.
 - MCP policy enforcer is opt-in behind `RUFLO_MCP_ENFORCE_POLICY=1` and only rate-limits.
 - The Claude Code hook handler exits **1** where blocking needs **2**, so `[BLOCKED]` never blocks. `pre-edit` is wired in settings.json to a handler that does not exist.
 - Autopilot is never installed by `init`, its check returns exit 0, and **`'failed'` is in `TERMINAL_STATUSES`** — a failed task counts as done. We do not use it.
-- `predictedCostUsd` is hardcoded `0` with the comment "bandit doesn't price".
+- ~~`predictedCostUsd` is hardcoded `0`~~ — **fixed by T12** (2026-09-21): now prices the real tokenized task text via `gpt-tokenizer`, an input-only floor pending T9/T10's real estimator (which then landed and supersedes it).
 - `claims_check` / `claims_grant` / `claims_revoke` are advertised but **do not exist**.
 
 **Testing maturity signal:** CI carries **121 known-failing test files** on a ratchet (`scripts/ci-test-ratchet.mjs`), coverage thresholds are commented out in `v3/vitest.config.ts`, and the verification pipeline runs `continue-on-error: true`. **Assume inherited code is unproven until you test it.** When something fails in the pilot, suspect inherited breakage before suspecting our workflow.
@@ -105,17 +114,87 @@ Five parallel audits found that ruflo's mechanisms are often written correctly a
 | D2 | No fixed retry limit; a high total spend limit before the first overnight run |
 | D3 | First backfill area is `v3/@claude-flow/cli/src/ruvector/` |
 | D4 | Sairam enables branch protection, on the day T17 merges |
-| D5 | Calibration set budget is $50, about $2-3 per task |
+| D5 | Calibration set budget is $50, about $2-3 per task (revised down to $30 before T8 ran; real spend was $0 — see D6) |
+| D6 | With no real LLM key available, the implementing session itself does the reasoning any task needing a real model call requires (T6/T8/T24), labelled `agent-inferred` with tokenizer-approximated cost, never auto-confirmed — see §9 |
 
 Also settled: quoting ships first (Phase 2); estimator v0 is nearest-neighbour, not regression; every quote is a range with confidence, never a point estimate; failure routes to `Blocked`, never `Done`.
 
-## 9. Where to start
+## 9. How this got built with no real LLM API key
 
-26 tasks in 10 phases, vertically sliced. Three have no dependencies:
+**No implementing session ever had `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`,
+or `OLLAMA_API_KEY` configured.** This was confirmed directly, not assumed —
+`env | grep -i anthropic` came back empty, and Claude Code's own login is a
+macOS Keychain-scoped session/OAuth credential (`"Claude Code-credentials"`),
+not a portable bearer token `callAnthropicMessages` (the primitive every real
+LLM call in this codebase goes through) can use. Several tasks structurally
+need a real model call — T6's decomposition quality pass, T8's calibration
+pilot, T24's inferred-requirement extraction — and the pipeline's own real
+code paths (`decompose.ts`, `backfill/infer.ts`,
+`scripts/run-calibration-pilot.mjs`) all correctly refuse to spend without
+real credentials, confirmed by running them for real and getting a clean
+`No LLM provider configured` error, never a crash and never a silent
+fallback. **That refusal was never patched around or weakened.**
 
-- **T12** — fix pricing and tokenizer bugs. *Recommended first.* Two disagreeing price tables, unknown models silently priced at a made-up rate, every token count is `length / 4`, `predictedCostUsd` hardcoded to 0. Every number the quote produces flows through this code.
-- **T7** — build the training corpus from the existing trajectory log. Can run parallel to T12.
-- **T1** — wire Graphify in as an MCP server with CI refresh.
+**What happened instead, established at T8 and then generalized to every
+later task that hit the same wall (the user's own direction: "use the
+AI/claude/codex etc current session as the real llm"):** the AI coding
+session doing the implementation work — this one — did the actual reading
+and reasoning itself, in-conversation, using its own real tool calls (real
+file reads, real git log, real dependency lists), and wrote the result
+into the exact same real record substrate a genuine API call would have
+produced. Nothing about the record format, validation, or downstream
+gates changed — only where the "model call" came from. Every such record
+is labelled honestly, not passed off as a real API response:
+
+- **Token/cost is approximated**, never taken from a real `usage` object —
+  via this repo's own local tokenizer (`gpt-tokenizer`, cl100k_base,
+  `src/ruvector/token-count.ts`) on the real text actually produced, priced
+  against the **nearest real entry in `model-prices.ts`** (this session's
+  real model has no table entry of its own — `anthropic/claude-sonnet-4-6`
+  is the stated proxy throughout, not the originally-planned tier).
+- **Provenance is `agent-inferred`**, same as any other machine-produced
+  proposal — never `human`, never silently indistinguishable from an
+  authored record. Where the schema supports it (T24's requirements and
+  decisions), a real `confidence` score travels with it too.
+- **Nothing produced this way is auto-accepted.** T24's own inferred
+  requirements/decisions are written `status: draft`; this session never
+  confirmed its own proposals — that step is left for an actual human,
+  deliberately, since self-confirming would be exactly the trust failure
+  provenance-tagging exists to prevent.
+
+Where this was used, concretely: T8's 16 real calibration task records
+(`docs/tasks/TASK-001`–`016`); T6's real quality pass producing
+REQ-001/002/003 and their 15 decomposed tasks (`TASK-017`–`031`); T24's
+real REQ-004/DEC-002 (`v3/@claude-flow/cli/src/ruvector/estimator/`, this
+session's own module, run through the real `backfill infer` command via
+`--from-file` after the reasoning was done in-conversation). Each of
+these runs surfaced real bugs in the pipeline it was exercising (T21's
+readability validator mis-splitting fenced code blocks and paragraph
+breaks; `writeTaskRecord` writing records that claimed `done` without
+earning it) — the substitute path is not a mock, it exercises the same
+real validation and write code a genuine API call would hit.
+
+**Separately, and not to be confused with the above:** ruflo's own local
+memory (`ruflo memory store` / `memory search`) needs **no API key at
+all**, and never did — confirmed by direct code audit, not inferred from
+docs. It embeds locally via `Xenova/all-MiniLM-L6-v2` (ONNX, downloaded
+once from a public CDN, no auth) into a local sql.js/HNSW vector index.
+This was real, working, zero-cost infrastructure sitting unused before
+this session. Per the user's own direction, it is now used as a manual
+operating habit: after each substitute-LLM pass above, the pattern and
+what it found is written to the `patterns` namespace with
+`ruflo memory store`, and spot-checked retrievable afterward with
+`memory search` — not wired into any shipped command automatically, a
+discipline this session (and the next one) follows by hand.
+
+**If real credentials show up later:** nothing here needs to be undone.
+`decompose.ts`, `backfill/infer.ts`, and the calibration pilot script all
+still take a real `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`/
+`OLLAMA_API_KEY` on their normal, untouched code path — the substitute was
+a session-level workaround for *this* implementing session having no key,
+not a permanent architecture change. Re-running any of T6/T8/T24 for real
+would produce records in the exact same shape, just with `usage`-sourced
+tokens instead of a tokenizer approximation.
 
 Commands: `npm test` (vitest), `npm run build` (tsc), both at root and in `v3/@claude-flow/cli`.
 
