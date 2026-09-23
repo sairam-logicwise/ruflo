@@ -111,3 +111,62 @@ describe('validateReadability — a normal, well-written record body is unaffect
     expect(result.ok).toBe(true);
   });
 });
+
+describe('validateReadability — fenced code blocks are not prose (real bug found validating T8\'s calibration task records)', () => {
+  it('does not fold a large code block into one giant sentence-length violation', () => {
+    const body =
+      'Add a size cap before parsing.\n\n' +
+      '```ts\n' +
+      'const MAX_FRONTMATTER_BYTES = 64 * 1024;\n' +
+      'if (match[1].length > MAX_FRONTMATTER_BYTES) {\n' +
+      '  return { frontmatter: {}, body, parseError: new Error("frontmatter block exceeds the byte limit and parsing is refused") };\n' +
+      '}\n' +
+      'const frontmatter = parseYaml(match[1], { schema: JSON_SCHEMA }) ?? {};\n' +
+      '```\n\n' +
+      'That is the whole change.';
+    const result = validateReadability(body);
+    expect(result.ok).toBe(true);
+  });
+
+  it('still checks the real prose surrounding a code block, code is exempt, not the whole body', () => {
+    const body =
+      'It is believed that the configuration might possibly need to be updated by the maintainer prior to the release ' +
+      'and this could somewhat affect downstream consumers who are utilizing the older interface so it should probably be reviewed.\n\n' +
+      '```ts\n' +
+      'const x = 1;\n' +
+      '```\n';
+    const result = validateReadability(body);
+    expect(result.ok).toBe(false);
+  });
+
+  it('does not flag a hedging word or jargon term written inside a code comment', () => {
+    const body = '```ts\n// maybe utilize a cache here prior to release\nconst x = 1;\n```\n';
+    const result = validateReadability(body, { strict: true });
+    expect(result.ok).toBe(true);
+  });
+
+  it('an unterminated code fence does not crash the check (degrades safely, does not hang)', () => {
+    const body = 'Some prose.\n\n```ts\nconst x = 1;\n';
+    expect(() => validateReadability(body)).not.toThrow();
+  });
+});
+
+describe('validateReadability — a paragraph break is always a sentence boundary (real bug found validating T8\'s calibration task records)', () => {
+  it('does not merge a new paragraph into the previous one just because it starts lowercase', () => {
+    // A record body legitimately opens a new paragraph with a code identifier
+    // (groundInGraph, reqNewCommand, ...) — lowercase by convention, not a
+    // grammar mistake. Collapsing the blank line before splitting used to
+    // glue this onto the prior sentence into one long pseudo-sentence.
+    const body = 'This is the setup sentence, ending cleanly.\n\ngroundInGraph() lives in features.ts for others to reuse.';
+    const result = validateReadability(body);
+    expect(result.ok).toBe(true);
+  });
+
+  it('still flags a genuinely long sentence within a single paragraph', () => {
+    const body =
+      'It is believed that the configuration might possibly need to be updated by the maintainer prior to the release ' +
+      'and this could somewhat affect downstream consumers who are utilizing the older interface so it should probably be reviewed.';
+    const result = validateReadability(body);
+    expect(result.ok).toBe(false);
+  });
+});

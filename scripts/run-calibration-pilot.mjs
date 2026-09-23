@@ -60,9 +60,9 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/docops/src/schemas/base.ts'],
     instructions:
-      'RecordIdSchema only checks the shape <PREFIX>-<digits>, so "REQ-1" and "REQ-001" are both valid but distinct strings — ' +
-      'a task citing "REQ-1" will never match a file actually named REQ-001-*.md. Propose a fix: either normalize ids to a ' +
-      'fixed digit width when comparing/looking up, or document why this is intentional if it should stay as-is. Show the code change.',
+      'RecordIdSchema only checks the shape <PREFIX>-<digits>. So "REQ-1" and "REQ-001" are both valid, but distinct, strings. ' +
+      'A task citing "REQ-1" will never match a file actually named REQ-001-*.md. Propose a fix: normalize ids to a fixed ' +
+      'digit width at lookup time, or document why the current behavior is intentional. Show the code change.',
   },
   {
     id: 'schema-version-field',
@@ -84,10 +84,10 @@ export const PILOT_TASKS = [
     tier: 'sonnet',
     contextFiles: ['v3/@claude-flow/docops/src/schemas/task.ts'],
     instructions:
-      'TaskSchema is built as z.object({...}).strict().refine(...), which produces a ZodEffects — it cannot be .extend()ed. ' +
-      'Future tasks (adding fields for done-criteria, actuals detail, etc.) will have to hand-edit this file rather than compose ' +
-      'on top of it. Propose exporting the plain object schema (before .strict()/.refine()) under a separate name, and applying ' +
-      '.strict().refine() last to build the schema actually used for validation. Show the concrete diff.',
+      'TaskSchema chains z.object({...}).strict().refine(...), which produces a ZodEffects. .extend() does not work on a ZodEffects. ' +
+      'Future tasks, adding fields for done-criteria or actuals detail, will have to hand-edit this file instead of composing on ' +
+      'top of it. Propose exporting the plain object schema, before .strict()/.refine(), under a separate name. Apply ' +
+      '.strict().refine() last, to build the schema validation actually uses. Show the concrete diff.',
   },
   {
     id: 'yaml-size-cap',
@@ -97,10 +97,10 @@ export const PILOT_TASKS = [
     tier: 'sonnet',
     contextFiles: ['v3/@claude-flow/docops/src/frontmatter.ts'],
     instructions:
-      'parseRecordFile parses the extracted frontmatter block with js-yaml with no size limit. A few-hundred-byte "billion ' +
-      'laughs"-style anchor/alias frontmatter can expand to tens of megabytes in under a millisecond — irrelevant for a local ' +
-      'checkout, but a real memory-exhaustion vector once record validation ever runs against untrusted PR content in CI. ' +
-      'Propose a size cap (on the raw frontmatter block, before parsing) with a clear error when exceeded. Show the code change.',
+      'parseRecordFile parses the extracted frontmatter block with js-yaml, with no size limit. A few-hundred-byte "billion ' +
+      'laughs" anchor/alias frontmatter can expand to tens of megabytes in under a millisecond. That is irrelevant for a local ' +
+      'checkout. It becomes a real memory-exhaustion vector once record validation runs against untrusted PR content in CI. ' +
+      'Propose a size cap on the raw frontmatter block, checked before parsing, with a clear error when exceeded. Show the code change.',
   },
   {
     id: 'docops-tsconfig-include',
@@ -110,9 +110,9 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/docops/tsconfig.json'],
     instructions:
-      'This tsconfig.json\'s "include" is ["src/**/*"], which leaves scripts/ and __tests__/ untypechecked by `npm run build` — ' +
-      'a type error in either would only surface when vitest happens to run them, not at build time. Propose the include-array ' +
-      'fix. Show the corrected JSON.',
+      'This tsconfig.json\'s "include" is ["src/**/*"]. That leaves scripts/ and __tests__/ untypechecked by `npm run build`. ' +
+      'A type error in either would only surface when vitest happens to run them, never at build time. Propose the ' +
+      'include-array fix. Show the corrected JSON.',
   },
   {
     id: 'docops-package-files',
@@ -122,9 +122,9 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/docops/package.json'],
     instructions:
-      'This package.json has no "files" field, so `npm publish` would ship everything not covered by .npmignore/.gitignore — ' +
-      'including tests and the vendor/ reference material, which is meant to stay a dev-time reference, not a runtime dependency ' +
-      'of consumers. Propose a "files" array scoped to what a consumer actually needs (dist, package.json itself, license/attribution). Show the JSON change.',
+      'This package.json has no "files" field. So `npm publish` would ship everything not covered by .npmignore/.gitignore. ' +
+      'That includes tests and the vendor/ reference material, meant to stay a dev-time reference, not a runtime dependency of ' +
+      'consumers. Propose a "files" array scoped to what a consumer actually needs: dist, package.json itself, license and attribution. Show the JSON change.',
   },
   {
     id: 'graph-refresh-permissions',
@@ -134,9 +134,9 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['.github/workflows/graph-refresh.yml'],
     instructions:
-      'This workflow has no top-level "permissions:" block, so it inherits the repository\'s default token permissions — wider ' +
-      'than this workflow (checkout + cache read/write) actually needs. Propose a minimal "permissions: contents: read" block ' +
-      '(plus whatever the cache action genuinely requires) and show exactly where it goes in the YAML.',
+      'This workflow has no top-level "permissions:" block. So it inherits the repository\'s default token permissions, wider ' +
+      'than this workflow (checkout plus cache read/write) actually needs. Propose a minimal "permissions: contents: read" ' +
+      'block, plus whatever the cache action genuinely requires. Show exactly where it goes in the YAML.',
   },
   {
     id: 'docops-readme',
@@ -146,9 +146,10 @@ export const PILOT_TASKS = [
     tier: 'sonnet',
     contextFiles: ['v3/@claude-flow/docops/src/index.ts', 'v3/@claude-flow/docops/ATTRIBUTION.md'],
     instructions:
-      '@claude-flow/docops has no README.md. Write one: what this package is (a typed record substrate for requirement/decision/task ' +
-      'records — see the exports in index.ts for the real API surface), why it exists (vendored/reimplemented from DocOps, not depended ' +
-      'on — see ATTRIBUTION.md), and a short usage example using validateRecordFile or parseRecordFile. Keep it concise — this is a README, not a spec.',
+      '@claude-flow/docops has no README.md. Write one. Say what this package is. It is a typed record substrate for ' +
+      'requirement, decision, and task records — see the exports in index.ts for the real API surface. Say why it exists. It ' +
+      'vendors and reimplements DocOps, without depending on it — see ATTRIBUTION.md. Add a short usage example using ' +
+      'validateRecordFile or parseRecordFile. Keep it concise. This is a README, not a spec.',
   },
   {
     id: 'records-new-factory',
@@ -158,11 +159,11 @@ export const PILOT_TASKS = [
     tier: 'sonnet',
     contextFiles: ['v3/@claude-flow/cli/src/commands/records.ts'],
     instructions:
-      'reqNewCommand, decisionNewCommand (not shown here but structurally identical), and taskNewCommand each hand-roll the same ' +
-      '~30-line pattern (resolve body, build frontmatter, validate, claimAndWriteRecord) with a different frontmatter literal and ' +
-      'different flags. Propose a `makeNewCommand(kind, buildFrontmatter)`-style factory that removes the duplication while keeping ' +
-      'each kind\'s own flags/validation distinct (task\'s citation-contract pre-check in particular must stay). Show the concrete ' +
-      'refactor for reqNewCommand specifically as the worked example.',
+      'reqNewCommand, decisionNewCommand (structurally identical, not shown here), and taskNewCommand each hand-roll the same ' +
+      '~30-line pattern: resolve body, build frontmatter, validate, claimAndWriteRecord. Each uses a different frontmatter ' +
+      'literal and different flags. Propose a `makeNewCommand(kind, buildFrontmatter)`-style factory that removes the ' +
+      'duplication. Keep each kind\'s own flags and validation distinct — task\'s citation-contract pre-check in particular ' +
+      'must stay. Show the concrete refactor for reqNewCommand as the worked example.',
   },
   {
     id: 'cli-package-assets-files',
@@ -172,10 +173,11 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/cli/package.json'],
     instructions:
-      'This package.json\'s "files" array lists dist, bin, scripts/postinstall.cjs, .claude, plugins, README.md, catalog-manifest.json ' +
-      '— but NOT assets/, even though model-router.ts and neural-router.ts both resolve real runtime assets (openrouter-alts.json, the ' +
-      'bundled KRR/calibrator artifacts) from a package-relative assets/ directory. A real `npm publish` would likely omit assets/ entirely, ' +
-      'breaking that resolution for every installed copy. Propose the files-array fix. Show the JSON change.',
+      'This package.json\'s "files" array lists dist, bin, scripts/postinstall.cjs, .claude, plugins, README.md, and ' +
+      'catalog-manifest.json. It does not list assets/. model-router.ts and neural-router.ts both resolve real runtime assets ' +
+      '(openrouter-alts.json, the bundled KRR/calibrator artifacts) from a package-relative assets/ directory. A real `npm ' +
+      'publish` would likely omit assets/ entirely, breaking that resolution for every installed copy. Propose the ' +
+      'files-array fix. Show the JSON change.',
   },
   {
     id: 'graph-load-caching',
@@ -185,11 +187,12 @@ export const PILOT_TASKS = [
     tier: 'opus',
     contextFiles: ['v3/@claude-flow/cli/src/ruvector/estimator/features.ts'],
     instructions:
-      'loadGraph() caches the parsed graph in-memory per graphPath, but that cache only helps within ONE process — every separate ' +
-      '`ruflo record req decompose` or feature-extraction CLI invocation pays the full JSON.parse cost of a real ~48MB graph.json ' +
-      'again from a cold process. Propose a concrete, scoped optimization (e.g. a persisted, pre-built index of just the code-node ' +
-      'label/source_file pairs actually needed for grounding, rebuilt only when the graph changes) and sketch the approach — this is ' +
-      'a design proposal, not a full implementation; explain the tradeoffs of your approach vs. just accepting the cold-start cost.',
+      'loadGraph() caches the parsed graph in-memory per graphPath. That cache only helps within ONE process. Every separate ' +
+      '`ruflo record req decompose` or feature-extraction CLI invocation pays the full JSON.parse cost of a real ~48MB ' +
+      'graph.json again, from a cold process. Propose a concrete, scoped optimization. One option: a persisted, pre-built ' +
+      'index of just the code-node label and source_file pairs grounding actually needs, rebuilt only when the graph ' +
+      'changes. Sketch the approach. This is a design proposal, not a full implementation. Explain the tradeoffs against just ' +
+      'accepting the cold-start cost.',
   },
   {
     id: 'ground-in-graph-test',
@@ -199,9 +202,9 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/cli/src/ruvector/estimator/features.ts', 'v3/@claude-flow/cli/__tests__/ruvector/estimator/features.test.ts'],
     instructions:
-      'groundInGraph() is exported from features.ts for reuse by decompose.ts, but the existing test file only exercises it ' +
-      'indirectly through extractFeatures(). Write 2-3 focused vitest cases that call groundInGraph() directly (fixture graph.json ' +
-      'on disk via mkdtempSync, matching this file\'s existing style) — a real match, no graph on disk, and a text with no keywords.',
+      'features.ts exports groundInGraph() for decompose.ts to reuse. The existing test file only exercises it indirectly, ' +
+      'through extractFeatures(). Write 2-3 focused vitest cases that call groundInGraph() directly. Use a fixture graph.json ' +
+      'on disk via mkdtempSync, matching this file\'s existing style. Cover a real match, no graph on disk, and text with no keywords.',
   },
   {
     id: 'inherit-tier-test',
@@ -211,10 +214,10 @@ export const PILOT_TASKS = [
     tier: 'haiku',
     contextFiles: ['v3/@claude-flow/cli/src/ruvector/model-router.ts', 'v3/@claude-flow/cli/__tests__/predicted-cost-openrouter-c4.test.ts'],
     instructions:
-      'The existing C4 regression test\'s "every tier that has an OpenRouter alt prices without throwing" test loops over ' +
-      '[haiku, sonnet, opus, inherit], but there\'s no test asserting specifically what the "inherit" tier resolves to under ' +
-      'CLAUDE_FLOW_ROUTER_PROVIDER=openrouter (does it get its own alt entry, or fall back to the label?). Write one focused test ' +
-      'for that, matching this file\'s existing style.',
+      'The existing C4 regression test\'s "every tier that has an OpenRouter alt prices without throwing" case loops over ' +
+      '[haiku, sonnet, opus, inherit]. No test asserts specifically what the "inherit" tier resolves to under ' +
+      'CLAUDE_FLOW_ROUTER_PROVIDER=openrouter. Does it get its own alt entry, or fall back to the label? Write one focused ' +
+      'test for that, matching this file\'s existing style.',
   },
   {
     id: 'decompose-examples',
@@ -235,10 +238,10 @@ export const PILOT_TASKS = [
     tier: 'sonnet',
     contextFiles: ['v3/@claude-flow/docops/src/schemas/requirement.ts', 'v3/@claude-flow/docops/src/schemas/decision.ts'],
     instructions:
-      'TaskSchema uses .strict().refine(), which produces a ZodEffects that can\'t be .extend()ed. Do RequirementSchema and/or ' +
-      'DecisionSchema have the same shape (object().strict() with a trailing .refine())? If so, propose the same fix ' +
-      '(export the object shape separately, apply refine last). If not, say so plainly and explain why they\'re different — a ' +
-      'clean "no bug here" verdict is a valid, useful answer.',
+      'TaskSchema chains .strict().refine(), which produces a ZodEffects. .extend() does not work on a ZodEffects. Do ' +
+      'RequirementSchema or DecisionSchema share that shape: object().strict() with a trailing .refine()? If so, propose the ' +
+      'same fix — export the object shape separately, apply refine last. If not, say so plainly, and explain why they ' +
+      'differ. A clean "no bug here" verdict is a valid, useful answer.',
   },
   {
     id: 'content-hash-lone-cr',
@@ -266,7 +269,7 @@ function assertSpread(tasks) {
   return Object.fromEntries(byType);
 }
 
-function buildPrompt(task) {
+export function buildPrompt(task) {
   const context = task.contextFiles
     .map((f) => `--- ${f} ---\n${readFileSync(join(REPO_ROOT, f), 'utf8')}`)
     .join('\n\n');
@@ -291,7 +294,7 @@ function resolveModel(tier) {
   };
 }
 
-function writeTaskRecord(ctx, task, response, actuals) {
+export function writeTaskRecord(ctx, task, response, actuals) {
   const dir = kindDir(ctx, 'task');
   ensureDir(dir);
   const now = new Date().toISOString();
@@ -299,6 +302,14 @@ function writeTaskRecord(ctx, task, response, actuals) {
     `Pilot task for T8 calibration (${task.workType}, ${task.size}).\n\n${task.instructions}\n\n` +
     `## Model response\n\n${response}\n`;
   const slug = task.id;
+  // T16/T17 (added after this script) — a task record claiming status:'done' has to actually
+  // earn it: an estimate and doneCriteria for the drafted/specified preconditions, and a citation
+  // to an ACCEPTED decision/requirement, or `record phase-check` correctly flags it as
+  // inconsistent. Grounded in the real actuals, not invented: the token total this call really
+  // used is both the "estimate" and the "actual" here, since this record is written retroactively,
+  // after the work already happened — +/-20% gives it a real (if trivial) range rather than a
+  // fake point estimate, matching AD-6's own "never a point estimate" rule.
+  const totalTokens = actuals.inputTokens + actuals.outputTokens;
   return claimAndWriteRecord(dir, RECORD_PREFIXES.task, slug, (id) => {
     const frontmatter = {
       id,
@@ -309,11 +320,22 @@ function writeTaskRecord(ctx, task, response, actuals) {
       updatedAt: now,
       citations: [ctx.decisionId],
       dependsOn: [],
+      estimate: {
+        lowTokens: Math.round(totalTokens * 0.8),
+        highTokens: Math.round(totalTokens * 1.2),
+        confidence: 0.9,
+      },
+      doneCriteria: { testLayers: [] }, // a proposal/explanation, not code this repo's own suite runs — T18's own "empty list is a valid, deliberate choice"
       actuals,
       contentHash: computeContentHash(body),
       provenance: 'agent-inferred',
     };
-    const result = validateRecord(frontmatter);
+    // Passes `body` (T21 readability + content-hash drift, both real checks) so a bad record fails
+    // loudly HERE, at write time, instead of writing successfully and only failing later at
+    // `record validate` — found the gap the hard way: an earlier version of this call omitted
+    // `body` and silently wrote 16 real records that failed validation the moment anyone actually
+    // ran `record validate` against them.
+    const result = validateRecord(frontmatter, body);
     if (!result.success) return { error: result.error.message ?? String(result.error) };
     return { content: serializeRecordFile(frontmatter, body) };
   });

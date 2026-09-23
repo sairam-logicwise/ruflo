@@ -1,7 +1,7 @@
 ---
 id: DEC-001
 title: Run a calibration set of real pilot tasks to ground the token/cost estimator
-status: draft
+status: accepted
 createdAt: 2026-09-22T11:35:56.046Z
 updatedAt: 2026-09-22T11:35:56.046Z
 citations: []

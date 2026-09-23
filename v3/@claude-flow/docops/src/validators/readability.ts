@@ -54,6 +54,27 @@ export interface ReadabilityOptions {
 const MAX_SENTENCE_WORDS = 25;
 
 /**
+ * A fenced code block (```...```, any info string) has no reason to
+ * contain sentence-ending punctuation the way prose does, so
+ * `splitSentences` was folding an entire code sample into one giant
+ * pseudo-"sentence" — real bug, found by validating a real record body
+ * that shows a code change alongside its explanation (T8's calibration
+ * pilot task records): a ~30-line TypeScript snippet inside a body
+ * produced a spurious 176-231-word sentence-length violation, and
+ * occasionally a false active-voice hit off a code comment. Stripped
+ * before ANY check runs, not just sentence-length — a hedging word or
+ * jargon term inside a code comment isn't prose either. This module's own
+ * stated scope is "summaries and reports," never code (see the module
+ * doc comment); a fenced block embedded in an otherwise-prose body is
+ * still code, and now correctly exempt.
+ */
+const FENCED_CODE_BLOCK = /```[\s\S]*?```/g;
+
+function stripCodeBlocks(text: string): string {
+  return text.replace(FENCED_CODE_BLOCK, '');
+}
+
+/**
  * Splits body text into sentences. A period/question mark/exclamation
  * point followed by whitespace and a capital letter, digit, or opening
  * quote/paren is treated as a sentence boundary — a pragmatic heuristic,
@@ -61,12 +82,28 @@ const MAX_SENTENCE_WORDS = 25;
  * "e.g. X" or a markdown list item ending mid-abbreviation). Good enough
  * for prose in a record body; not attempting decimal-number or
  * abbreviation disambiguation.
+ *
+ * A blank line (paragraph break) is ALSO always a boundary, checked before
+ * the punctuation-based split, on its own, unconditionally — a second real
+ * bug this same T8 exercise found: the old code collapsed all whitespace
+ * (including blank lines) into single spaces before ever looking for a
+ * boundary, so a new paragraph that happens to start with a lowercase code
+ * identifier (`groundInGraph() is exported...`, `reqNewCommand and
+ * decisionNewCommand are...`) never counted as starting a new sentence —
+ * the capital-letter check has no way to know it, and the previous
+ * paragraph's final sentence silently absorbed the whole next paragraph.
+ * A paragraph break is already a strong, unambiguous structural signal on
+ * its own; it does not need the capitalization heuristic to confirm it.
  */
 function splitSentences(text: string): string[] {
   return text
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)
+    .split(/\n\s*\n/)
+    .flatMap((paragraph) =>
+      paragraph
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/),
+    )
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -186,7 +223,7 @@ function checkJargon(sentence: string): ReadabilityIssue | null {
 /** Checks `text` against the structural rules, plus the controlled-vocabulary rule when `opts.strict` is set. */
 export function validateReadability(text: string, opts: ReadabilityOptions = {}): ReadabilityResult {
   const issues: ReadabilityIssue[] = [];
-  for (const sentence of splitSentences(text)) {
+  for (const sentence of splitSentences(stripCodeBlocks(text))) {
     for (const check of [checkSentenceLength, checkActiveVoice, checkOneInstruction, checkHedging]) {
       const issue = check(sentence);
       if (issue) issues.push(issue);
