@@ -114,6 +114,9 @@ const commandLoaders: Record<string, CommandLoader> = {
   // The autonomy loop (T25, agentic SDLC plan) — advances task records
   // through T19's verify and T20's repair until a pass makes no progress.
   run: () => import('./run.js'),
+  // Roll estimates up across a requirement's decomposed tasks and price
+  // them (T11, agentic SDLC plan) — a range with a confidence level.
+  quote: () => import('./quote.js'),
 };
 
 // Cache for loaded commands

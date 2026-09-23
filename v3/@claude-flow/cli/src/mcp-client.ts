@@ -24,6 +24,7 @@ import { analyzeTools } from './mcp-tools/analyze-tools.js';
 import { progressTools } from './mcp-tools/progress-tools.js';
 import { embeddingsTools } from './mcp-tools/embeddings-tools.js';
 import { claimsTools } from './mcp-tools/claims-tools.js';
+import { quoteTools } from './mcp-tools/quote-tools.js';
 import { policyTools } from './mcp-tools/policy-tools.js';
 import { authorizeMcpTool, classifyMcpTool } from './services/policy-runtime.js';
 import { securityTools } from './mcp-tools/security-tools.js';
@@ -191,6 +192,9 @@ registerTools([
   ...businessPodTools,
   // ADR-164 Phase 4 §5.1.8 — http_fetch (1 tool, secure-by-default HTTP probe)
   ...httpFetchTools,
+  // T11/TASK-022, agentic SDLC plan — quote_requirement + quote_backlog,
+  // the same roll-up logic `ruflo quote` uses via the CLI.
+  ...quoteTools,
 ]);
 
 // The capability brain consumes the completed live registry. This is injected
