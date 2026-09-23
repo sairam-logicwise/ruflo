@@ -21,6 +21,8 @@ export const RequirementSchema = z
     status: RequirementStatusSchema,
     /** Requirement ids this one supersedes, if any (mirrors DocOps's Context.Supersedes). */
     supersedes: z.array(RecordIdSchema).default([]),
+    /** T24: how much real evidence backed an inferred proposal — never set by a human-authored record. Absent, not a fabricated 1.0, when provenance is 'human'. */
+    confidence: z.number().min(0).max(1).optional(),
   })
   .strict();
 

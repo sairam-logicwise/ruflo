@@ -106,6 +106,62 @@ describe('ruflo record', () => {
     });
   });
 
+  // T24: the confirmation step — "a human confirms before it counts as authoritative".
+  describe('req/decision confirm — T24', () => {
+    it('promotes a draft requirement to accepted, preserving provenance and confidence', async () => {
+      ctx.flags = { title: 'Inferred requirement', provenance: 'agent-inferred', confidence: 0.65, _: [] };
+      const created = await sub(recordCommand, 'req', 'new').action!(ctx);
+      const id = (created?.data as { id: string }).id;
+
+      ctx.args = [id];
+      ctx.flags = { _: [] };
+      const confirmed = await sub(recordCommand, 'req', 'confirm').action!(ctx);
+      expect(confirmed?.success).toBe(true);
+
+      const filePath = (created?.data as { path: string }).path;
+      const raw = readFileSync(filePath, 'utf8');
+      expect(raw).toContain('status: accepted');
+      expect(raw).toContain('provenance: agent-inferred');
+      expect(raw).toContain('confidence: 0.65');
+    });
+
+    it('promotes a draft decision to accepted the same way', async () => {
+      ctx.flags = { title: 'Inferred decision', provenance: 'agent-inferred', confidence: 0.4, _: [] };
+      const created = await sub(recordCommand, 'decision', 'new').action!(ctx);
+      const id = (created?.data as { id: string }).id;
+
+      ctx.args = [id];
+      ctx.flags = { _: [] };
+      const confirmed = await sub(recordCommand, 'decision', 'confirm').action!(ctx);
+      expect(confirmed?.success).toBe(true);
+      expect(readFileSync((created?.data as { path: string }).path, 'utf8')).toContain('status: accepted');
+    });
+
+    it('refuses to confirm a record that is already accepted', async () => {
+      ctx.flags = { title: 'Already accepted', status: 'accepted', _: [] };
+      const created = await sub(recordCommand, 'req', 'new').action!(ctx);
+      const id = (created?.data as { id: string }).id;
+
+      ctx.args = [id];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'req', 'confirm').action!(ctx);
+      expect(result?.success).toBe(false);
+    });
+
+    it('refuses a nonexistent id', async () => {
+      ctx.args = ['REQ-999'];
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'req', 'confirm').action!(ctx);
+      expect(result?.success).toBe(false);
+    });
+
+    it('refuses a missing id', async () => {
+      ctx.flags = { _: [] };
+      const result = await sub(recordCommand, 'req', 'confirm').action!(ctx);
+      expect(result?.success).toBe(false);
+    });
+  });
+
   describe('task new — the citation contract', () => {
     it('refuses to create a task with no citations, naming what is missing', async () => {
       ctx.flags = { title: 'Fix pricing bugs', _: [] };

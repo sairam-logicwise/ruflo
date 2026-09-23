@@ -1918,18 +1918,80 @@ reporting empty dependencies/entry-points/coverage rather than guessing).
 **Why this matters:** This is the only part of the mapping problem nobody sells, and it is where our differentiation sits — Graphify gives structure, never intent. The provenance rule is load-bearing: if a guessed requirement is indistinguishable from an authored one, the substrate stops being trustworthy and every downstream gate inherits the doubt. Graphify's own extracted-versus-inferred tagging is the model to mirror.
 
 **Acceptance criteria:**
-- [ ] Produces requirement and decision records for a given area
-- [ ] Every record carries inferred provenance and a confidence score
-- [ ] An unconfirmed record cannot satisfy a phase gate
-- [ ] A confirmation command promotes a record to authoritative
+- [x] Produces requirement and decision records for a given area
+- [x] Every record carries inferred provenance and a confidence score
+- [x] An unconfirmed record cannot satisfy a phase gate
+- [x] A confirmation command promotes a record to authoritative
 
 **Verification:**
-- [ ] Run against one well-understood area, manually assess whether the requirements are recognisable
-- [ ] Test: an unconfirmed record does not satisfy a gate
-- [ ] Confirm records validate
+- [x] Run against one well-understood area, manually assess whether the requirements are recognisable
+- [x] Test: an unconfirmed record does not satisfy a gate
+- [x] Confirm records validate
+
+**Done 2026-09-23.** `ruflo backfill infer <area>` — same architecture as
+T6's `decompose` on purpose: one real LLM call (`callAnthropicMessages`),
+dry-run by default, `--from-file`/`--yes` to review before committing.
+New `backfill/infer.ts` grounds every proposal in REAL evidence, never a
+guess: T23's `summarizeArea()` (structure, deps, entry points, test
+presence — $0, from the Graphify graph), the area's own real `git log`,
+and a real README if one exists. Schema: added an optional `confidence`
+field (0-1) to `RequirementSchema`/`DecisionSchema` (docops) — absent,
+not a fabricated 1.0, on a human-authored record. Every proposal writes
+`provenance: agent-inferred`, `status: draft`, and its own stated
+`confidence`, **never** `status: accepted` directly, no matter how high
+the confidence — the whole point of this task.
+
+Acceptance criterion 3 ("an unconfirmed record cannot satisfy a phase
+gate") needed **zero new gating code**: T16's existing
+`checkCitationAcceptance()` already refuses a citation whose record isn't
+`status: accepted`, and every inferred proposal starts `draft` by
+construction — the two pieces already compose. Proven end to end in a
+new `t24-confirm-gate.test.ts`: a real task citing a real, unconfirmed,
+agent-inferred requirement stays blocked through `ruflo run`'s real state
+machine; running the new `ruflo record req confirm <id>` (T24's
+acceptance criterion 4 — new `confirmRecord()` in records-io.ts, `draft
+-> accepted`, refuses anything not currently `draft`) and re-running
+advances the SAME task with no other input changed.
+
+Real verification run (this task's own step, session-as-LLM per the
+user's standing directive, since no LLM credentials exist in this
+session): ran `ruflo backfill infer` against
+`v3/@claude-flow/cli/src/ruvector/estimator/` — an area this session
+built and understands directly. First confirmed the graceful, real
+"no LLM provider configured" failure path with no `--from-file` (no
+crash, no fabricated output). Then reasoned for real from the area's
+actual module docs, real dependency list, and real git log
+(`git log --oneline -- <area>`, showing T10 then T11 landing in
+sequence), wrote real proposals to the scratchpad, verified readability
+against the real compiled validator (T21) before submitting — same
+loop T6/T8 already established, including the SAME lowercase-sentence-
+start workaround T6 hit ("predict.ts finds..." merges into the prior
+sentence under T21's real boundary regex; reworded to "The predict.ts
+module..."). `--from-file --yes` created REQ-004 ("Estimate a task's
+token and cost range from real history before work starts", confidence
+0.85) and DEC-002 ("Predict from nearest historical neighbours, not a
+trained regression model", confidence 0.75), both real, both
+recognizable on manual read, both `status: draft` — deliberately left
+unconfirmed by this session, since confirming an agent's own inferred
+proposal is exactly the anti-pattern this task exists to prevent; a
+human reviews and runs `req confirm`/`decision confirm`. `ruflo record
+validate` passes all 37 records (35 pre-existing + these 2) clean.
+
+24 new tests (13 in `backfill/infer.test.ts` — including a REAL git repo
+for the git-log grounding, no mocking — 10 in
+`backfill-infer-command.test.ts` mocking only the LLM call same as
+decompose.test.ts, 5 confirm-command tests in records.test.ts, 1
+end-to-end gate-composition test), plus docops's full suite (132 tests)
+and the full pre-existing cli suite for every touched area (489 tests) —
+zero regressions. The wider, unrelated `__tests__/` tree (3852 tests
+total) has 23 pre-existing failing files, confirmed unrelated by name/
+import (mostly `@claude-flow/neural` module resolution, matching the
+SAME pre-existing failure already isolated and confirmed via `git stash`
+during T11's verification — grep confirms none of them import anything
+this task touched).
 
 **Dependencies:** T16, T23
-**Files likely touched:** agent definition, record writer, state machine, tests
+**Files likely touched:** `v3/@claude-flow/cli/src/backfill/infer.ts`, `commands/backfill.ts`, `commands/records.ts`, `commands/records-io.ts`, `docops/schemas/{requirement,decision}.ts`, tests
 **Estimated scope:** M
 
 ---

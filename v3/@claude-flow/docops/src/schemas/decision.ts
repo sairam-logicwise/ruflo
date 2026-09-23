@@ -25,6 +25,8 @@ export const DecisionSchema = z
     supersedes: z.array(RecordIdSchema).default([]),
     /** Related record ids, informational only (no validation implication). */
     related: z.array(RecordIdSchema).default([]),
+    /** T24: how much real evidence backed an inferred proposal — never set by a human-authored record. Absent, not a fabricated 1.0, when provenance is 'human'. */
+    confidence: z.number().min(0).max(1).optional(),
   })
   .strict();
 

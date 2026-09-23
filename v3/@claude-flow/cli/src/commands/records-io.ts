@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import { parseRecordFile, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals } from '@claude-flow/docops';
+import { parseRecordFile, serializeRecordFile, validateRecord, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals } from '@claude-flow/docops';
 import type { RepairLoopResult } from '../ruvector/repair-loop.js';
 
 const KIND_DIR: Record<RecordKind, string> = {
@@ -193,6 +193,38 @@ export function checkCitationAcceptance(ctx: CommandContext, task: Task): Citati
     if (frontmatter.status !== 'accepted') unacceptedIds.push(id);
   }
   return { allAccepted: unacceptedIds.length === 0, unacceptedIds };
+}
+
+/**
+ * T24: promotes a requirement/decision from `draft` to `accepted` — "a
+ * human confirms before it counts as authoritative" (the task's own
+ * acceptance criterion), general-purpose for any draft record, not only
+ * an inferred one (a human-authored draft is just as real a draft).
+ * Refuses cleanly on anything already `accepted`/`superseded` rather than
+ * silently no-op'ing, same "refuse loud, not silent" convention as
+ * task-repair.ts's own state refusals. `confidence`/`provenance` are left
+ * untouched — confirming doesn't erase how a record was produced, only
+ * that a human has now vouched for it.
+ */
+export function confirmRecord(ctx: CommandContext, kind: 'requirement' | 'decision', id: string): { ok: true; filePath: string } | { ok: false; error: string } {
+  const dir = kindDir(ctx, kind);
+  const filePath = findRecordPath(dir, id);
+  if (!filePath) return { ok: false, error: `no ${kind} found matching id "${id}" in ${dir}` };
+
+  const raw = readFileSync(filePath, 'utf8');
+  const { frontmatter, body, parseError } = parseRecordFile(raw);
+  if (parseError) return { ok: false, error: `${filePath} is not valid YAML frontmatter: ${parseError.message}` };
+
+  if (frontmatter.status !== 'draft') {
+    return { ok: false, error: `${id} is "${frontmatter.status}", not "draft" — only a draft record can be confirmed` };
+  }
+
+  const newFrontmatter: Record<string, unknown> = { ...frontmatter, status: 'accepted', updatedAt: new Date().toISOString() };
+  const validated = validateRecord(newFrontmatter, body);
+  if (!validated.success) return { ok: false, error: formatValidationError(validated.error) };
+
+  writeFileSync(filePath, serializeRecordFile(newFrontmatter, body), 'utf8');
+  return { ok: true, filePath };
 }
 
 /**

@@ -41,12 +41,36 @@ import {
   splitList,
   resolveBody,
   formatValidationError,
+  confirmRecord,
 } from './records-io.js';
 import decomposeCommand from './decompose.js';
 import taskVerifyCommand from './task-verify.js';
 import taskRepairCommand from './task-repair.js';
 import phaseCheckCommand from './phase-check.js';
 import workflowDocsCommand from './workflow-docs.js';
+
+/** T24: shared `confirm <id>` action for req/decision — draft -> accepted, "a human confirms before it counts as authoritative". */
+function makeConfirmCommand(kind: 'requirement' | 'decision'): Command {
+  return {
+    name: 'confirm',
+    description: `Promote a draft ${kind} to accepted (T24) — the human-confirmation step an inferred proposal needs before it can satisfy a phase gate`,
+    options: [{ name: 'id', description: `${kind} id`, type: 'string' }],
+    action: async (ctx: CommandContext): Promise<CommandResult> => {
+      const id = ctx.args[0] || (ctx.flags.id as string);
+      if (!id) {
+        output.printError(`Usage: ruflo record ${kind === 'requirement' ? 'req' : 'decision'} confirm <id>`);
+        return { success: false, exitCode: 1 };
+      }
+      const result = confirmRecord(ctx, kind, id);
+      if (!result.ok) {
+        output.printError(`Refusing to confirm ${id}`, result.error);
+        return { success: false, exitCode: 1 };
+      }
+      output.printSuccess(`${id} confirmed: draft -> accepted`);
+      return { success: true, data: { id, filePath: result.filePath } };
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Requirement
@@ -62,6 +86,7 @@ const reqNewCommand: Command = {
     { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
     { name: 'supersedes', description: 'Comma-separated requirement ids this supersedes', type: 'string' },
     { name: 'provenance', description: 'human|agent-inferred', type: 'string', default: 'human' },
+    { name: 'confidence', description: 'T24: 0-1, how much real evidence backed an inferred proposal (omit for a human-authored record)', type: 'number' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const title = ctx.flags.title as string | undefined;
@@ -74,6 +99,7 @@ const reqNewCommand: Command = {
     const body = resolveBody(ctx, title);
     const now = new Date().toISOString();
     const slug = slugify(title);
+    const confidence = ctx.flags.confidence as number | undefined;
 
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.requirement, slug, (id) => {
       const frontmatter = {
@@ -86,6 +112,7 @@ const reqNewCommand: Command = {
         contentHash: computeContentHash(body),
         provenance: (ctx.flags.provenance as string) ?? 'human',
         supersedes: splitList(ctx.flags.supersedes),
+        ...(confidence !== undefined ? { confidence } : {}),
       };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
@@ -121,10 +148,12 @@ const reqListCommand: Command = {
   action: async (ctx: CommandContext): Promise<CommandResult> => listRecords(ctx, 'requirement'),
 };
 
+const reqConfirmCommand = makeConfirmCommand('requirement');
+
 const reqCommand: Command = {
   name: 'req',
   description: 'Requirement records — the "why" (T3/T4, agentic SDLC plan)',
-  subcommands: [reqNewCommand, reqShowCommand, reqListCommand, decomposeCommand],
+  subcommands: [reqNewCommand, reqShowCommand, reqListCommand, reqConfirmCommand, decomposeCommand],
   action: reqListCommand.action,
 };
 
@@ -144,6 +173,7 @@ const decisionNewCommand: Command = {
     { name: 'supersedes', description: 'Comma-separated decision ids this supersedes', type: 'string' },
     { name: 'related', description: 'Comma-separated related record ids', type: 'string' },
     { name: 'provenance', description: 'human|agent-inferred', type: 'string', default: 'human' },
+    { name: 'confidence', description: 'T24: 0-1, how much real evidence backed an inferred proposal (omit for a human-authored record)', type: 'number' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const title = ctx.flags.title as string | undefined;
@@ -156,6 +186,7 @@ const decisionNewCommand: Command = {
     const body = resolveBody(ctx, title);
     const now = new Date().toISOString();
     const slug = slugify(title);
+    const confidence = ctx.flags.confidence as number | undefined;
 
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.decision, slug, (id) => {
       const frontmatter = {
@@ -169,6 +200,7 @@ const decisionNewCommand: Command = {
         provenance: (ctx.flags.provenance as string) ?? 'human',
         supersedes: splitList(ctx.flags.supersedes),
         related: splitList(ctx.flags.related),
+        ...(confidence !== undefined ? { confidence } : {}),
       };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
@@ -204,10 +236,12 @@ const decisionListCommand: Command = {
   action: async (ctx: CommandContext): Promise<CommandResult> => listRecords(ctx, 'decision'),
 };
 
+const decisionConfirmCommand = makeConfirmCommand('decision');
+
 const decisionCommand: Command = {
   name: 'decision',
   description: 'Decision records — the "how it was decided" (T3/T4, agentic SDLC plan)',
-  subcommands: [decisionNewCommand, decisionShowCommand, decisionListCommand],
+  subcommands: [decisionNewCommand, decisionShowCommand, decisionListCommand, decisionConfirmCommand],
   action: decisionListCommand.action,
 };
 
