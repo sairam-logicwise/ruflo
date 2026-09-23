@@ -478,11 +478,11 @@ pass — not blocking anything now.
 - [x] Output is reviewable and editable before it is committed
 
 **Verification:**
-- [ ] Run against three requirements of differing size, inspect output quality manually — **not done**: this needs a real, paid LLM call, and the user held T8 back specifically because it spends money. Verified everything else about the pipeline (prompt building, response parsing, grounding, record writing) end-to-end via `--from-file` and a mocked LLM call instead, at $0. Flag for the user: do they want to authorize a few real decompose calls to judge actual output quality, same as the T8 decision?
+- [x] Run against three requirements of differing size, inspect output quality manually — done 2026-09-23, via the same session-as-LLM substitute T8 established (see below)
 - [x] All produced records pass `ruflo validate` — verified via the real compiled CLI: created a real requirement, decomposed it via `--from-file`, `--yes`, then ran `ruflo record validate` — all records (requirement + tasks) pass
 - [x] Confirm referenced paths exist in the repo — verified via the real compiled CLI with a real graph fixture: a proposal citing one real file (`src/pricing.ts`, present in the graph) and one hallucinated file (`src/totally-made-up-file.ts`, not in the graph) produced a task record containing only the real path
 
-**Done 2026-09-22, pending a real-LLM quality pass.** New CLI subcommand
+**Done 2026-09-22; real-LLM quality pass completed 2026-09-23 (see below).** New CLI subcommand
 `ruflo record req decompose <id>` in `src/commands/decompose.ts`. Reuses
 `callAnthropicMessages` from `mcp-tools/agent-execute-core.ts` (the same
 primitive `agent_execute` uses) rather than the heavier swarm agent-store
@@ -517,6 +517,49 @@ check `resolveBody()` already does for `--body-file`, which I should have
 matched from the start. Fixed, with a regression test constructing `ctx`
 with the camelCase form directly (a unit test alone would never have found
 this, since a hand-built `ctx` object doesn't go through the real parser).
+
+**Real-LLM quality pass done 2026-09-23**, via the same session-as-LLM
+substitute T8 established, generalized on the user's own explicit
+direction ("use the AI/claude/codex etc current session as the real
+llm and update the memory every time") rather than staying blocked on
+credentials a second time. Created 3 real, differently-sized
+requirements this repo genuinely still needs — REQ-001 (large: roll up
+estimates into a quote, CLI+MCP — literally T11), REQ-002 (medium:
+capture real actuals into the task record — T13), REQ-003 (small:
+variance report — T14) — then decomposed each via the real `--from-file`
+path this session's own real reasoning fed, not a mock.
+
+**A real, honest finding, not a clean pass**: `groundInGraph()`'s
+token-overlap heuristic, already known to work well for narrow,
+code-specific TASK text (T9's own verification), returned only noise for
+these broader REQUIREMENT-level descriptions — 15 "matches" per
+requirement, none of them the actually-relevant files (`predict.ts`,
+`corpus.ts`, `decompose.ts` itself), just generic-word collisions
+(`mcp`, `tool`, `report`) across this 3667-file monorepo. The honest
+response, matching decompose.ts's own instruction ("if a task is
+genuinely new code with no existing file to touch, leave files empty
+rather than inventing paths"), was to leave `files: []` on every
+proposed task rather than cite any of the spurious matches — not a bug
+fix in this task's own scope, a documented limitation to flag,
+same discipline as T9/T23's own already-documented gaps.
+
+**A second real finding, from actually running the write path**: of the
+first 15 proposals across all three requirements, 12 were REFUSED by
+`record validate`'s real T21 readability check on the first attempt —
+dense sentences, passive voice — and needed genuine rewriting before
+they'd write. This is the readability gate doing exactly its job: even
+a model that knows the rule does not reliably satisfy it without
+deliberate editing, which is the whole point of checking it structurally
+rather than trusting a system prompt instruction alone.
+
+**Result**: 15 real task records (TASK-017 through TASK-031) across the
+3 requirements (7/4/4, within the 3-15 range each), all citing their
+real requirement, all passing `record validate` and `record
+phase-check` for real. Per the user's own follow-up direction, each
+decomposition is also recorded in ruflo's own local memory system
+(`memory store`, real 384-dim embeddings, `--provenance agent_output`,
+`patterns` namespace, no API key) — confirmed retrievable via a real
+`memory search` afterward, not just written and forgotten.
 
 **Dependencies:** T1, T4
 **Files likely touched:** agent definition, `v3/@claude-flow/cli/src/commands/records.ts`
