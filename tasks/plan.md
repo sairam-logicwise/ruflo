@@ -776,19 +776,95 @@ cover each feature independently, the token-overlap threshold specifically
 **Why this matters:** This is requirement 2, the team's stated first priority. Nearest-neighbour rather than regression because it degrades gracefully: with twenty examples it gives a wide but honest range, and it tightens as history grows, with no retraining step. Returning a range rather than a number is not a nicety — a single figure will be wrong and will be quoted back at us.
 
 **Acceptance criteria:**
-- [ ] Returns low, high, and confidence for a task record
-- [ ] Confidence drops when no near neighbour exists, and says so
-- [ ] Retry multiplier is configurable and documented
-- [ ] Refuses to emit a point estimate anywhere in the API
+- [x] Returns low, high, and confidence for a task record
+- [x] Confidence drops when no near neighbour exists, and says so
+- [x] Retry multiplier is configurable and documented
+- [x] Refuses to emit a point estimate anywhere in the API
 
 **Verification:**
-- [ ] Unit tests: dense neighbourhood gives narrow range, sparse gives wide plus low confidence
-- [ ] Hold-out test over the calibration set: actual falls inside the quoted range for most tasks
-- [ ] Record the hit rate — this is our accuracy baseline
+- [x] Unit tests: dense neighbourhood gives narrow range, sparse gives wide plus low confidence
+- [x] Hold-out test over the calibration set: actual falls inside the quoted range for most tasks
+- [x] Record the hit rate — this is our accuracy baseline
 
 **Dependencies:** T7, T8, T9
 **Files likely touched:** `v3/@claude-flow/cli/src/ruvector/estimator/predict.ts`, tests
 **Estimated scope:** M
+
+**Done 2026-09-23.** `src/ruvector/estimator/predict.ts` exports
+`predictTokens(complexityScore, corpus, opts)` — k-nearest-neighbour
+(default k=5) by complexity distance alone. Deliberately reduced to that
+ONE dimension, not T9's full feature vector: complexity is the only field
+T7's trajectory rows (task text + complexity, no file-grounding data) and
+T8's calibration task records genuinely share, and folding in the richer
+T9 features would need real weights this repo has no evidence for yet —
+fabricating them would repeat the exact "no fake precision" mistake this
+plan's own reasoning keeps calling out elsewhere (T9's grounding
+threshold, T21's readability heuristics). `corpus.ts` gained
+`loadCalibrationRows()` (reads real `docs/tasks/*.md` records with
+`actuals`, via T9's own `extractFeatures` so the same complexity
+heuristic grounds both the router's tier pick and the estimator) and
+`buildUnifiedCorpus()` (plain concatenation of T7's trajectory rows and
+T8's calibration rows, tagged by `source`).
+
+**Never a point estimate, structurally**: `predictTokens` returns
+`{ ok: true; estimate } | { ok: false; reason }`, never a bare number.
+An empty corpus is `{ ok: false }`, not a fabricated `{lowTokens: 0,
+highTokens: 0}` — there is a real difference between "we estimate zero"
+and "we cannot estimate," and collapsing them would hand T11's `ruflo
+quote` a lie it could repeat without meaning to. The retry multiplier
+(default 1.3, configurable via `opts.retryMultiplier`) scales ONLY
+`highTokens` — a retry/repair round only ever adds tokens on top of a
+real base attempt, never lowers the cheapest real outcome — and is
+explicitly documented as a stated assumption, not measured: T20 has run
+zero real repairs at the time of writing, so there is no real retry-cost
+history to derive it from yet.
+
+**A real, honest finding from actually running the hold-out check**
+(`scripts/estimator-holdout-check.mjs`, new — leave-one-out over T8's
+real 16-record calibration set, never predicting a record from itself):
+**hit rate 12/16 (75.0%)** — inside "most tasks" per this task's own
+verification wording, and the real accuracy baseline this task exists to
+produce. But the FIRST confidence formula (coverage × complexity-
+closeness only) scored several predictions at 0.90+ confidence for
+ranges spanning `[603, 24842]` — a >40x spread — because it measured
+whether neighbours were close in COMPLEXITY, never whether they actually
+AGREED on cost. Fixed by folding in a third factor, a scale-free spread
+measure over the neighbours' own token totals (`(max-min)/(max+min)`, so
+a `[1000,1100]` range and a `[100000,110000]` range score equally
+"tight" — the right comparison across task sizes spanning orders of
+magnitude). Re-running the SAME real hold-out afterward: identical
+75.0% hit rate (the ranges themselves didn't change), but confidence
+dropped to a genuinely humble 0.05-0.39 across the board — appropriately
+humble for a 15-row corpus, not the 0.9-plus the first version claimed.
+An overconfident number is worse than none: a stakeholder reading a
+quote has no way to tell a well-supported 0.9 from a badly-supported
+one. Caught by actually running the verification this task's own
+acceptance criteria call for, not by unit tests alone — the unit tests
+(dense/sparse neighbourhoods, both with matching token totals by
+construction) never would have exposed a formula that only looks at
+complexity distance and ignores token variance.
+
+**Trajectory corpus contributed zero rows** to this real run —
+`CLAUDE_FLOW_ROUTER_TRAJECTORY` has never been enabled in this checkout
+(the same open item T7 itself flagged, now confirmed rather than left
+theoretical). The 75% hit rate above is calibration-only.
+
+**Verified for real**: 11 new `predict.ts` tests (empty corpus refused;
+a real range structurally always returned; dense-neighbourhood
+narrow-range-high-confidence; sparse-neighbourhood wide-range-low-
+confidence; confidence names itself in `reason` when neighbours are
+thin; retry multiplier scales only the top, defaults to something >1;
+`k` caps neighbour count on a larger corpus; true `corpusSize` reported
+regardless of `k`; the real trajectory/calibration source split named in
+`reason`; nearest-by-distance selection, not corpus order) plus 6 new
+`corpus.ts` tests for `loadCalibrationRows`/`buildUnifiedCorpus`
+(missing `docs/tasks/`, a real record with `actuals`, skipping one with
+none, skipping one that fails to validate without crashing the scan,
+source tagging, both sources empty). Then the real hold-out script, run
+twice against the actual repo, not a fixture — once exposing the
+confidence bug, once confirming the fix.
+
+Full regression: 132 docops + 72 targeted CLI tests green.
 
 ---
 

@@ -2,11 +2,12 @@
  * T7 (agentic SDLC plan) — estimator training corpus builder.
  */
 
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildEstimatorCorpus, loadEstimatorCorpus } from '../../../src/ruvector/estimator/corpus.js';
+import { buildEstimatorCorpus, loadEstimatorCorpus, loadCalibrationRows, buildUnifiedCorpus, type CorpusRow } from '../../../src/ruvector/estimator/corpus.js';
+import { computeContentHash, serializeRecordFile } from '@claude-flow/docops';
 
 function decision(overrides: Partial<Record<string, unknown>> = {}): string {
   return JSON.stringify({
@@ -223,5 +224,80 @@ describe('loadEstimatorCorpus', () => {
     const { rows, stats } = loadEstimatorCorpus('/nonexistent/path/does-not-exist.jsonl');
     expect(rows).toHaveLength(0);
     expect(stats.totalLines).toBe(0);
+  });
+});
+
+/** T10/T8 — reading real task records (T8's calibration set, or any future completed task) into estimator rows. */
+describe('loadCalibrationRows', () => {
+  let repoRoot: string;
+  let tasksDir: string;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'calibration-rows-'));
+    tasksDir = join(repoRoot, 'docs', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  function writeTaskFile(filename: string, extra: Record<string, unknown>): void {
+    const body = '# A task\n\nSimple, short body.\n';
+    const frontmatter = {
+      id: 'TASK-001',
+      title: 'A task',
+      status: 'done',
+      priority: 'p2',
+      createdAt: '2026-09-23T00:00:00.000Z',
+      updatedAt: '2026-09-23T00:00:00.000Z',
+      citations: ['REQ-001'],
+      dependsOn: [],
+      contentHash: computeContentHash(body),
+      provenance: 'agent-inferred',
+      ...extra,
+    };
+    writeFileSync(join(tasksDir, filename), serializeRecordFile(frontmatter, body));
+  }
+
+  it('returns [] when docs/tasks/ does not exist at all', () => {
+    rmSync(tasksDir, { recursive: true, force: true });
+    expect(loadCalibrationRows(repoRoot)).toEqual([]);
+  });
+
+  it('reads a real task record with actuals into a calibration row', () => {
+    writeTaskFile('TASK-001-x.md', { actuals: { inputTokens: 1000, outputTokens: 500, costUsd: 0.01 } });
+    const rows = loadCalibrationRows(repoRoot);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ inputTokens: 1000, outputTokens: 500, source: 'calibration' });
+    expect(rows[0].complexity).toBeGreaterThanOrEqual(0);
+    expect(rows[0].complexity).toBeLessThanOrEqual(1);
+  });
+
+  it('skips a task record with no actuals — nothing to teach the estimator', () => {
+    writeTaskFile('TASK-001-x.md', {});
+    expect(loadCalibrationRows(repoRoot)).toEqual([]);
+  });
+
+  it('skips a record that does not validate, without crashing the rest of the scan', () => {
+    writeFileSync(join(tasksDir, 'TASK-001-broken.md'), '---\nid: TASK-001\nstatus: not-a-real-status\n---\n\nbroken\n');
+    writeTaskFile('TASK-002-x.md', { id: 'TASK-002', actuals: { inputTokens: 500, outputTokens: 200, costUsd: 0.005 } });
+    const rows = loadCalibrationRows(repoRoot);
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('buildUnifiedCorpus', () => {
+  it('combines trajectory and calibration rows, tagging each by its real source', () => {
+    const trajectory: CorpusRow[] = [{ task: 'x', complexity: 0.3, model: 'haiku', inputTokens: 100, outputTokens: 50, ts: '2026-01-01T00:00:00.000Z' }];
+    const calibration = [{ complexity: 0.6, inputTokens: 1000, outputTokens: 500, source: 'calibration' as const }];
+    const unified = buildUnifiedCorpus(trajectory, calibration);
+    expect(unified).toHaveLength(2);
+    expect(unified.find((r) => r.source === 'trajectory')).toMatchObject({ complexity: 0.3, inputTokens: 100, outputTokens: 50 });
+    expect(unified.find((r) => r.source === 'calibration')).toMatchObject({ complexity: 0.6, inputTokens: 1000, outputTokens: 500 });
+  });
+
+  it('handles two empty sources without error', () => {
+    expect(buildUnifiedCorpus([], [])).toEqual([]);
   });
 });

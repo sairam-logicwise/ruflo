@@ -20,12 +20,16 @@
  * @module estimator/corpus
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { parseRecordFile, validateRecord, type Task } from '@claude-flow/docops';
 import type {
   TrajectoryDecisionRow,
   TrajectoryOutcomeRow,
   TrajectoryRow,
 } from '../router-trajectory.js';
+import { extractFeatures } from './features.js';
+import type { EstimatorRow } from './predict.js';
 
 /** One labelled example: a task the router routed, and what it actually cost. */
 export interface CorpusRow {
@@ -222,4 +226,71 @@ export function loadEstimatorCorpus(path: string): CorpusResult {
     return { rows: [], stats: emptyStats(0) };
   }
   return buildEstimatorCorpus(text);
+}
+
+/**
+ * T10/T8: reads every real task record under `docs/tasks/` with `actuals`
+ * populated — T8's calibration pilot, and, over time, any real completed
+ * task — and turns each into an `EstimatorRow` via T9's own
+ * `extractFeatures()`, so the SAME complexity heuristic the router uses
+ * to pick a model tier is what predict.ts measures neighbour distance
+ * against. A task record with no `actuals` (not yet `done`, or `done`
+ * without real evidence — T19 makes that latter case impossible by
+ * construction) has nothing to teach the estimator and is skipped, not
+ * counted as zero — same "don't teach a wrong association" reasoning
+ * `buildEstimatorCorpus` already applies to a trajectory row with no
+ * usable tokens.
+ */
+export function loadCalibrationRows(repoRoot: string, graphPath?: string): EstimatorRow[] {
+  const dir = join(repoRoot, 'docs', 'tasks');
+  if (!existsSync(dir)) return [];
+
+  const rows: EstimatorRow[] = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+    let raw: string;
+    try {
+      raw = readFileSync(join(dir, file), 'utf8');
+    } catch {
+      continue;
+    }
+    const { frontmatter, body, parseError } = parseRecordFile(raw);
+    if (parseError) continue;
+    const validated = validateRecord(frontmatter, body);
+    if (!validated.success) continue;
+    const task = validated.record as Task;
+    if (!task.actuals) continue;
+
+    const features = extractFeatures(
+      { title: task.title, citations: task.citations, dependsOn: task.dependsOn },
+      body,
+      { repoRoot, ...(graphPath ? { graphPath } : {}) },
+    );
+    rows.push({
+      complexity: features.complexityScore,
+      inputTokens: task.actuals.inputTokens,
+      outputTokens: task.actuals.outputTokens,
+      source: 'calibration',
+    });
+  }
+  return rows;
+}
+
+/**
+ * Combines T7's trajectory corpus with T8's calibration task records into
+ * the single `EstimatorRow[]` predict.ts expects. Kept as a plain
+ * concatenation, not a weighted merge — predict.ts's own neighbour
+ * selection already treats every row identically by complexity distance,
+ * and `source` on each row lets a caller (or predict.ts's own `reason`
+ * string) see the real split after the fact rather than baking an
+ * unweighted guess about trajectory-vs-calibration trust into this
+ * function instead.
+ */
+export function buildUnifiedCorpus(trajectoryRows: CorpusRow[], calibrationRows: EstimatorRow[]): EstimatorRow[] {
+  const fromTrajectory: EstimatorRow[] = trajectoryRows.map((r) => ({
+    complexity: r.complexity,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    source: 'trajectory',
+  }));
+  return [...fromTrajectory, ...calibrationRows];
 }
