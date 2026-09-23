@@ -38,9 +38,13 @@ describe('ruflo record phase-check', () => {
   });
 
   async function createTask(reqStatus: 'accepted' | 'draft', patch?: (raw: string) => string): Promise<{ id: string; filePath: string; reqPath: string }> {
-    ctx.flags = { title: 'req one', status: reqStatus, _: [] };
+    // req new has no --status (Review #3, Important 1) — patch the file directly when the test needs it accepted.
+    ctx.flags = { title: 'req one', _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
+    if (reqStatus === 'accepted') {
+      writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+    }
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);

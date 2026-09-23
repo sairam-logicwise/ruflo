@@ -57,9 +57,11 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
 
   /** Drafted, with an accepted citation, a real estimate, and empty doneCriteria — everything `drafted -> specified -> implementing` needs, none of it fabricated evidence (an estimate/doneCriteria a real caller would have set). */
   async function createDraftedTask(): Promise<{ id: string; filePath: string }> {
-    ctx.flags = { title: 'req one', status: 'accepted', _: [] };
+    // req new has no --status (Review #3, Important 1) — patch the file directly to accept it.
+    ctx.flags = { title: 'req one', _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
-    const reqId = (req?.data as { id: string }).id;
+    const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
+    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);

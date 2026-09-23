@@ -53,10 +53,16 @@ describe('ruflo run', () => {
     // Defaults to an ACCEPTED citation so every test that isn't specifically
     // about T16's citation-acceptance gate exercises only the precondition
     // it names, same "arrange only what the test is about" reasoning as the
-    // rest of this suite.
-    ctx.flags = { title: 'req one', status: reqStatus, _: [] };
+    // rest of this suite. req new has no --status (Review #3, Important 1
+    // — a real exploit, the gate must not be self-serviceable at creation),
+    // so acceptance is set by patching the file directly, same as every
+    // other post-creation status patch in this suite.
+    ctx.flags = { title: 'req one', _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
-    const reqId = (req?.data as { id: string }).id;
+    const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
+    if (reqStatus === 'accepted') {
+      writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+    }
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
@@ -104,7 +110,7 @@ describe('ruflo run', () => {
   });
 
   it('a blocked-from-drafted task resumes once a human fixes the underlying condition (found via T16 manual verification — resumeFromBlocked had no caller at all before this)', async () => {
-    ctx.flags = { title: 'req one', status: 'draft', _: [] };
+    ctx.flags = { title: 'req one', _: [] }; // draft by construction — no --status any more (Important 1)
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
 

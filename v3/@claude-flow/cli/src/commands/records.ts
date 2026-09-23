@@ -81,7 +81,13 @@ const reqNewCommand: Command = {
   description: 'Create a new requirement record',
   options: [
     { name: 'title', description: 'Requirement title', type: 'string', required: true },
-    { name: 'status', description: 'draft|accepted|superseded', type: 'string', default: 'draft' },
+    // Review #3, Important 1: deliberately NO --status option — a real
+    // exploit found and verified end to end ("the citation gate is
+    // self-serviceable"): `req new --status=accepted` let a brand-new
+    // requirement satisfy T16's citation-acceptance gate with zero
+    // review. Same fix T19 already applied to `task new --status`, for
+    // the identical reason — creation always starts `draft`, full stop;
+    // `accepted` is only earned through `req confirm` (T24).
     { name: 'body', description: 'Markdown body text', type: 'string' },
     { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
     { name: 'supersedes', description: 'Comma-separated requirement ids this supersedes', type: 'string' },
@@ -105,7 +111,7 @@ const reqNewCommand: Command = {
       const frontmatter = {
         id,
         title,
-        status: (ctx.flags.status as string) ?? 'draft',
+        status: 'draft',
         createdAt: now,
         updatedAt: now,
         citations: [],
@@ -166,7 +172,7 @@ const decisionNewCommand: Command = {
   description: 'Create a new decision record',
   options: [
     { name: 'title', description: 'Decision title', type: 'string', required: true },
-    { name: 'status', description: 'draft|accepted|superseded', type: 'string', default: 'draft' },
+    // Review #3, Important 1: no --status here either — same reasoning as reqNewCommand above.
     { name: 'body', description: 'Markdown body text', type: 'string' },
     { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
     { name: 'citations', description: 'Comma-separated ids this decision cites (optional)', type: 'string' },
@@ -192,7 +198,7 @@ const decisionNewCommand: Command = {
       const frontmatter = {
         id,
         title,
-        status: (ctx.flags.status as string) ?? 'draft',
+        status: 'draft',
         createdAt: now,
         updatedAt: now,
         citations: splitList(ctx.flags.citations),

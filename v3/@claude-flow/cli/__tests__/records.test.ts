@@ -106,6 +106,30 @@ describe('ruflo record', () => {
     });
   });
 
+  // Review #3, Important 1: "the citation gate is self-serviceable" — a
+  // real exploit, verified end to end: `req new --status=accepted` let a
+  // brand-new requirement satisfy T16's citation-acceptance gate with
+  // zero review. Fixed by removing --status from creation entirely (same
+  // fix T19 already applied to `task new`) — accepted is only earned
+  // through `req confirm`/`decision confirm` (T24).
+  describe('req/decision new — no self-serviceable --status (Important 1)', () => {
+    it('always creates a requirement as draft, even when --status=accepted is passed', async () => {
+      ctx.flags = { title: 'Sneaky requirement', status: 'accepted', _: [] };
+      const created = await sub(recordCommand, 'req', 'new').action!(ctx);
+      expect(created?.success).toBe(true);
+      const filePath = (created?.data as { path: string }).path;
+      expect(readFileSync(filePath, 'utf8')).toContain('status: draft');
+    });
+
+    it('always creates a decision as draft, even when --status=accepted is passed', async () => {
+      ctx.flags = { title: 'Sneaky decision', status: 'accepted', _: [] };
+      const created = await sub(recordCommand, 'decision', 'new').action!(ctx);
+      expect(created?.success).toBe(true);
+      const filePath = (created?.data as { path: string }).path;
+      expect(readFileSync(filePath, 'utf8')).toContain('status: draft');
+    });
+  });
+
   // T24: the confirmation step — "a human confirms before it counts as authoritative".
   describe('req/decision confirm — T24', () => {
     it('promotes a draft requirement to accepted, preserving provenance and confidence', async () => {
@@ -138,12 +162,14 @@ describe('ruflo record', () => {
     });
 
     it('refuses to confirm a record that is already accepted', async () => {
-      ctx.flags = { title: 'Already accepted', status: 'accepted', _: [] };
+      ctx.flags = { title: 'Already accepted', _: [] };
       const created = await sub(recordCommand, 'req', 'new').action!(ctx);
       const id = (created?.data as { id: string }).id;
-
+      // Confirm it for real once — the only way a req reaches accepted now (Important 1).
       ctx.args = [id];
       ctx.flags = { _: [] };
+      await sub(recordCommand, 'req', 'confirm').action!(ctx);
+
       const result = await sub(recordCommand, 'req', 'confirm').action!(ctx);
       expect(result?.success).toBe(false);
     });
