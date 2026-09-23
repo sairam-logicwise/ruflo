@@ -117,6 +117,9 @@ const commandLoaders: Record<string, CommandLoader> = {
   // Roll estimates up across a requirement's decomposed tasks and price
   // them (T11, agentic SDLC plan) — a range with a confidence level.
   quote: () => import('./quote.js'),
+  // Quoted versus actual across delivered tasks (T14, agentic SDLC plan) —
+  // hit rate and trend over time.
+  variance: () => import('./variance.js'),
 };
 
 // Cache for loaded commands

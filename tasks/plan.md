@@ -1101,23 +1101,59 @@ $0 test discipline as T20's own repair-loop.test.ts.
 **Why this matters:** Requirement 6 of trust, not of the spec: a quote that visibly improves is persuasive, a quote that was quietly wrong is not. Publishing variance from the first delivered task is how we avoid the failure mode where an early bad number damages confidence in the whole programme. It is also our only feedback signal on whether the estimator is working.
 
 **Acceptance criteria:**
-- [ ] `ruflo variance` shows quoted versus actual per task and in aggregate
-- [ ] Shows the hit rate: how often actual fell inside the quoted range
-- [ ] Trend over time is visible
+- [x] `ruflo variance` shows quoted versus actual per task and in aggregate
+- [x] Shows the hit rate: how often actual fell inside the quoted range
+- [x] Trend over time is visible
 
 **Verification:**
-- [ ] Tests over fixture data
-- [ ] Manual: run against the calibration set, sanity-check the numbers
+- [x] Tests over fixture data
+- [x] Manual: run against the calibration set, sanity-check the numbers
+
+**Done 2026-09-23.** Implemented from T6's own real decomposition of REQ-003
+(TASK-019/029/030/031) as the literal implementation plan. New
+`estimator/variance.ts`: for every task record carrying BOTH `estimate`
+and `actuals`, compares the recorded range to the real actual total
+(input+output), marks hit/miss (inclusive on both boundaries), and rolls
+up an aggregate hit rate with real sample size attached (never reported
+alone — TASK-030's own acceptance criterion). Trend (TASK-031) is a
+chronologically-ordered, CUMULATIVE hit rate — not a date-bucket average
+— so a 1-task early sample visibly reads as "100% over 1 task," not a
+false trend line. Deliberately compares a task's OWN recorded `estimate`
+field, never re-deriving one via T10's `predictTokens()` — variance
+measures whether the estimate a task actually shipped with held up,
+whatever produced it.
+
+TASK-019's own manual verification step surfaced a real, important
+finding: run for real (`ruflo variance`, a pure read, $0) against this
+repo's own 16 real T8 calibration records, it reports a 100% hit rate —
+which does **NOT** match `estimator-holdout-check.mjs`'s real 75.0%
+hold-out figure, and was never expected to once traced through. T8's
+calibration records' `estimate` field is `[0.8x, 1.2x]` of their OWN
+`actuals` (computed directly FROM the actuals, before T10's estimator
+existed) — comparing that estimate to those same actuals is tautological
+by construction, not a measurement of T10's real predictive accuracy.
+Nothing in this codebase currently writes a task's `estimate` field FROM
+`predictTokens()` at all; until something does, `ruflo variance`'s hit
+rate on this repo's own records measures self-consistency of T8's
+synthetic band, not estimator accuracy. Documented plainly in
+`variance.ts`'s own module doc and the CLI's real output, not papered
+over — the same "measured, not asserted" discipline as every other honest
+finding this plan has surfaced (T9's grounding-heuristic limitation,
+T10's confidence recalibration). 11 new tests (hit/miss/boundary,
+skip-and-name for a missing estimate/actuals/both, aggregate hit rate
+over a mixed sample, chronological trend ordering independent of file
+read order, small-sample honesty, malformed-record tolerance), plus the
+full pre-existing suite (458 tests, zero regressions).
 
 **Dependencies:** T13
-**Files likely touched:** `v3/@claude-flow/cli/src/commands/quote.ts`, tests
+**Files likely touched:** `v3/@claude-flow/cli/src/commands/variance.ts`, `v3/@claude-flow/cli/src/ruvector/estimator/variance.ts`, `commands/index.ts`, tests
 **Estimated scope:** S
 
 ---
 
 ### Checkpoint: Phase 3
-- [ ] Estimate and actual are both recorded, and variance is reportable
-- [ ] Corpus grows automatically as work completes
+- [x] Estimate and actual are both recorded, and variance is reportable (T13, T14 — scoped honestly: only the repair path (T20) has real, measured LLM spend to record; `ruflo variance` is real but its 100% figure on this repo's OWN records is a tautology of T8's synthetic estimate band, not a measurement of T10's real accuracy — see T14's Done note)
+- [x] Corpus grows automatically as work completes (T10's `loadCalibrationRows` already scans fresh on every read — confirmed via a real regression test, TASK-027)
 - [ ] **Human review before proceeding**
 
 ---
