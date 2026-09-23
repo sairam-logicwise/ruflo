@@ -73,6 +73,9 @@ function auditDoneReceipt(task: Task): string | undefined {
   if (!task.verification) {
     return `status is "done" with required test layers (${requiredLayers.join(', ')}) but carries no verification receipt at all`;
   }
+  if (task.verification.exitCode !== 0) {
+    return `status is "done" but its verification receipt recorded a failing run (exit ${task.verification.exitCode})`;
+  }
   if (task.verification.contentHash !== task.contentHash) {
     return `status is "done" but its verification receipt was produced against a different body (receipt contentHash ${task.verification.contentHash.slice(0, 12)}… vs current ${task.contentHash.slice(0, 12)}…) — re-verify after the edit`;
   }

@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
+import { restampHash } from './record-test-utils.js';
 
 vi.mock('../src/ruvector/repair-loop.js', () => ({ runRepairLoop: vi.fn() }));
 vi.mock('../src/ruvector/test-runner.js', async () => {
@@ -61,14 +62,14 @@ describe('ruflo run', () => {
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
     if (reqStatus === 'accepted') {
-      writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+      writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted')));
     }
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
     const { id, path: filePath } = task?.data as { id: string; path: string };
 
-    if (patch) writeFileSync(filePath, patch(readFileSync(filePath, 'utf8')));
+    if (patch) writeFileSync(filePath, restampHash(patch(readFileSync(filePath, 'utf8'))));
     return { id, filePath };
   }
 
@@ -117,7 +118,7 @@ describe('ruflo run', () => {
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
     const { path: filePath } = task?.data as { id: string; path: string };
-    writeFileSync(filePath, readFileSync(filePath, 'utf8').replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\n---\n\n'));
+    writeFileSync(filePath, restampHash(readFileSync(filePath, 'utf8').replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\n---\n\n')));
 
     ctx.args = [];
     ctx.flags = { _: [] };
@@ -126,7 +127,7 @@ describe('ruflo run', () => {
 
     // A human accepts the requirement between runs — no tooling change, just editing the file,
     // exactly like every other "fix it by hand" pattern already used throughout this plan.
-    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+    writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted')));
 
     ctx.flags = { _: [] };
     await runCommand.action!(ctx);

@@ -73,8 +73,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, type Task, type TransitionResult } from '@claude-flow/docops';
-import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance, buildRepairActuals, buildVerificationReceipt } from './records-io.js';
+import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, computeContentHash, type Task, type TransitionResult } from '@claude-flow/docops';
+import { kindDir, listRecordFiles, formatValidationError, applyTaskTransition, checkCitationAcceptance, buildRepairActuals, buildVerificationReceipt, finalizeContentHash } from './records-io.js';
 import { verifyTask, resolveTestCommand, type TestRunResult } from '../ruvector/test-runner.js';
 import { runRepairLoop } from '../ruvector/repair-loop.js';
 
@@ -157,13 +157,18 @@ const runCommand: Command = {
 
         // T13/C1: `actuals`/`verification` are optional patches on top of
         // the transition — only the verifying and repair branches below
-        // ever have either to report.
-        const write = (transition: TransitionResult, extra: { actuals?: ReturnType<typeof buildRepairActuals>; verification?: ReturnType<typeof buildVerificationReceipt> } = {}): string | undefined => {
-          const newFrontmatter = {
-            ...applyTaskTransition(frontmatter, transition),
-            ...(extra.actuals ? { actuals: extra.actuals } : {}),
-            ...(extra.verification ? { verification: extra.verification } : {}),
-          };
+        // ever have either to report. Review #3, Important 5: `verification`
+        // is excluded from `computeContentHash`'s scope (content-hash.ts),
+        // so its own receipt hash is computed from the patch BEFORE
+        // verification is merged in — `buildVerification` receives that
+        // hash rather than a caller-supplied stale one.
+        const write = (
+          transition: TransitionResult,
+          extra: { actuals?: ReturnType<typeof buildRepairActuals>; buildVerification?: (contentHash: string) => ReturnType<typeof buildVerificationReceipt> } = {},
+        ): string | undefined => {
+          const patched = { ...applyTaskTransition(frontmatter, transition), ...(extra.actuals ? { actuals: extra.actuals } : {}) };
+          const verification = extra.buildVerification ? extra.buildVerification(computeContentHash(patched, body)) : undefined;
+          const newFrontmatter = finalizeContentHash({ ...patched, ...(verification ? { verification } : {}) }, body);
           const validatedNew = validateRecord(newFrontmatter, body);
           if (!validatedNew.success) return `refusing to write invalid result: ${formatValidationError(validatedNew.error)}`;
           writeFileSync(filePath, serializeRecordFile(newFrontmatter, body), 'utf8');
@@ -215,7 +220,7 @@ const runCommand: Command = {
 
         if (task.status === 'verifying') {
           const { transition, testRun } = await verifyTask(task, { cwd: ctx.cwd, command: commandOverride });
-          const err = write(transition, { verification: testRun ? buildVerificationReceipt(testRun, frontmatter.contentHash as string) : undefined });
+          const err = write(transition, { buildVerification: testRun ? (h) => buildVerificationReceipt(testRun, h) : undefined });
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;
           outcomes.push({ id: task.id, action: 'verified', status: transition.ok ? transition.to : 'blocked', detail: testRun ? `exit ${testRun.exitCode}` : undefined });
@@ -265,7 +270,7 @@ const runCommand: Command = {
           // T13/C1: written whether this ended repaired or exhausted-and-blocked.
           const err = write(transition, {
             actuals: buildRepairActuals(repairResult),
-            verification: reVerifyTestRun ? buildVerificationReceipt(reVerifyTestRun, frontmatter.contentHash as string) : undefined,
+            buildVerification: reVerifyTestRun ? (h) => buildVerificationReceipt(reVerifyTestRun, h) : undefined,
           });
           if (err) { stuck.push({ id: task.id, status: task.status, reason: err }); continue; }
           madeProgress = true;

@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
+import { restampHash } from './record-test-utils.js';
 
 vi.mock('../src/ruvector/repair-loop.js', () => ({ runRepairLoop: vi.fn() }));
 vi.mock('../src/ruvector/test-runner.js', async () => {
@@ -66,7 +67,7 @@ describe('ruflo record task repair', () => {
         `blocked:\n  reason: ${blocked.reason}\n  unblockCondition: ${blocked.unblockCondition}\n  fromState: ${blocked.fromState}\n---\n\n`,
       );
     }
-    writeFileSync(filePath, raw);
+    writeFileSync(filePath, restampHash(raw));
     return { id, filePath };
   }
 

@@ -12,7 +12,7 @@ doneCriteria:
   testLayers:
     - unit
     - e2e
-contentHash: b68e9b3193401f59da6b57688e5c45e350baaffe0cba912789ef10f45245bc3e
+contentHash: 54a5135ab0e1fde42a130114a0e73ce80b3eb2ac99f2fd55e3be8aa22140de0f
 provenance: agent-inferred
 ---
 

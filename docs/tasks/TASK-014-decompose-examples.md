@@ -20,7 +20,7 @@ actuals:
   costUsd: 0.01335
   source: proxy
   priceModel: anthropic/claude-sonnet-4-6
-contentHash: d34d9e14ddb0469b29db60e8fc5cca9d063e4efe0bccb637f3b92c659520b860
+contentHash: 995acc19980e3ffe907bf9997fe5168d6703bb374eeaca5a4fb2645855b5f197
 provenance: agent-inferred
 ---
 

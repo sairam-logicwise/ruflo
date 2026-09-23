@@ -109,18 +109,21 @@ const reqNewCommand: Command = {
     const confidence = ctx.flags.confidence as number | undefined;
 
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.requirement, slug, (id) => {
-      const frontmatter = {
+      // Important 5, review #3: contentHash now covers the whole
+      // frontmatter, not just the body — build every other field first,
+      // hash THAT (contentHash is excluded from its own input), then add it.
+      const fields = {
         id,
         title,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
         citations: [],
-        contentHash: computeContentHash(body),
         provenance: (ctx.flags.provenance as string) ?? 'human',
         supersedes: splitList(ctx.flags.supersedes),
         ...(confidence !== undefined ? { confidence } : {}),
       };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
@@ -196,19 +199,19 @@ const decisionNewCommand: Command = {
     const confidence = ctx.flags.confidence as number | undefined;
 
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.decision, slug, (id) => {
-      const frontmatter = {
+      const fields = {
         id,
         title,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
         citations: splitList(ctx.flags.citations),
-        contentHash: computeContentHash(body),
         provenance: (ctx.flags.provenance as string) ?? 'human',
         supersedes: splitList(ctx.flags.supersedes),
         related: splitList(ctx.flags.related),
         ...(confidence !== undefined ? { confidence } : {}),
       };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
@@ -302,7 +305,7 @@ const taskNewCommand: Command = {
     const slug = slugify(title);
 
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.task, slug, (id) => {
-      const frontmatter = {
+      const fields = {
         id,
         title,
         status: 'drafted',
@@ -311,9 +314,9 @@ const taskNewCommand: Command = {
         updatedAt: now,
         citations,
         dependsOn: splitList(ctx.flags['depends-on'] ?? ctx.flags.dependsOn),
-        contentHash: computeContentHash(body),
         provenance: (ctx.flags.provenance as string) ?? 'human',
       };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };
@@ -438,6 +441,7 @@ const validateCommand: Command = {
     let total = 0;
     const failures: Array<{ path: string; error: string }> = [];
     const fixed: string[] = [];
+    const clearedVerification: string[] = [];
 
     for (const kind of kinds) {
       const dir = kindDir(ctx, kind);
@@ -457,7 +461,21 @@ const validateCommand: Command = {
         // author's data to make a validator happy — never do that.
         if (fix && result.error instanceof ContentHashMismatchError) {
           const { frontmatter, body } = parseRecordFile(raw);
-          frontmatter.contentHash = computeContentHash(body);
+          // Important 5, review #3: a stale record hash means whatever this
+          // record's `verification` receipt (C1) certified — a specific
+          // body, under a specific hash scheme — no longer matches what's
+          // on disk now, whether the cause is an ordinary hand-edit or
+          // (the migration case this fix itself introduces) contentHash
+          // starting to cover the whole frontmatter. Clearing it converts
+          // "a receipt that silently no longer means what it claims" into
+          // "no receipt, needs re-verification" — the SAME state
+          // phase-check already reports clearly, not a confusing
+          // false-positive that reads as tampering.
+          if (frontmatter.verification !== undefined) {
+            delete frontmatter.verification;
+            clearedVerification.push(filePath);
+          }
+          frontmatter.contentHash = computeContentHash(frontmatter, body);
           const rewritten = serializeRecordFile(frontmatter, body);
           const revalidated = validateRecordFile(rewritten);
           if (revalidated.success) {
@@ -479,6 +497,10 @@ const validateCommand: Command = {
       output.printSuccess(`Rehashed ${fixed.length} record(s):`);
       for (const p of fixed) output.writeln(`  ${p}`);
     }
+    if (clearedVerification.length > 0) {
+      output.printWarning(`Cleared a stale verification receipt on ${clearedVerification.length} record(s) — the body or frontmatter it certified no longer matches, so it needs re-verification:`);
+      for (const p of clearedVerification) output.writeln(`  ${p}`);
+    }
 
     if (failures.length > 0) {
       output.printError(`${failures.length}/${total} record(s) failed validation`);
@@ -486,11 +508,11 @@ const validateCommand: Command = {
         output.writeln(`  ${f.path}`);
         output.writeln(`    ${f.error}`);
       }
-      return { success: false, exitCode: 1, data: { total, invalid: failures.length, failures, fixed } };
+      return { success: false, exitCode: 1, data: { total, invalid: failures.length, failures, fixed, clearedVerification } };
     }
 
     output.printSuccess(`All ${total} record(s) valid.`);
-    return { success: true, data: { total, invalid: 0, fixed } };
+    return { success: true, data: { total, invalid: 0, fixed, clearedVerification } };
   },
 };
 

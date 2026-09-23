@@ -291,7 +291,11 @@ async function main() {
     totalOutputTokens += outputTokens;
     totalCostUsd += cost;
 
-    const actuals = { inputTokens, outputTokens, costUsd: cost };
+    // Review #3, C3/Important 11: this whole script IS the session-as-LLM
+    // substitute path — tokenizer-counted, not a real API usage object —
+    // so this is genuinely `proxy`, matching the 16 real records already
+    // backfilled this way.
+    const actuals = { inputTokens, outputTokens, costUsd: cost, source: 'proxy', priceModel: PRICE_ID };
 
     if (!yes) {
       results.push({ task, status: 'dry-run', actuals });

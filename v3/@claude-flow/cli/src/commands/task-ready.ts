@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { parseRecordFile, serializeRecordFile, validateRecord, attemptTransition, type Task } from '@claude-flow/docops';
-import { kindDir, findRecordPath, formatValidationError, applyTaskTransition } from './records-io.js';
+import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, finalizeContentHash } from './records-io.js';
 
 const taskReadyCommand: Command = {
   name: 'ready',
@@ -68,7 +68,7 @@ const taskReadyCommand: Command = {
     }
 
     const transition = attemptTransition(task, 'implementing', {});
-    const newFrontmatter = applyTaskTransition(frontmatter, transition);
+    const newFrontmatter = finalizeContentHash(applyTaskTransition(frontmatter, transition), body);
     const validatedNew = validateRecord(newFrontmatter, body);
     if (!validatedNew.success) {
       output.printError('Refusing to write an invalid result', formatValidationError(validatedNew.error));

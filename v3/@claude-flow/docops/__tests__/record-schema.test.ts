@@ -12,7 +12,7 @@ import { TaskSchema } from '../src/schemas/task.js';
 import { computeContentHash } from '../src/content-hash.js';
 
 const now = '2026-09-21T00:00:00.000Z';
-const hash = computeContentHash('some body text');
+const hash = computeContentHash({}, 'some body text'); // format-only fixture — these tests never cross-check the hash against a body
 
 function validRequirement(overrides: Record<string, unknown> = {}) {
   return {

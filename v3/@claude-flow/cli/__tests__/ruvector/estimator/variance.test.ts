@@ -36,14 +36,14 @@ describe('variance.ts', () => {
     const title = opts.title ?? `Task ${id}`;
     const body = `# ${title}\n\nA plain task body.\n`;
     const createdAt = opts.createdAt ?? '2026-09-23T00:00:00.000Z';
-    const frontmatter: Record<string, unknown> = {
+    const fields: Record<string, unknown> = {
       id, title, status: 'done', priority: 'p2',
       createdAt, updatedAt: createdAt,
-      citations: ['REQ-999'], dependsOn: [],
-      contentHash: computeContentHash(body), provenance: 'agent-inferred',
+      citations: ['REQ-999'], dependsOn: [], provenance: 'agent-inferred',
       ...(opts.estimate ? { estimate: opts.estimate } : {}),
       ...(opts.actuals ? { actuals: { source: 'measured', priceModel: 'anthropic/claude-sonnet-4-6', ...opts.actuals } } : {}),
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     writeFileSync(join(taskDir, `${id}-x.md`), serializeRecordFile(frontmatter, body));
   }
 

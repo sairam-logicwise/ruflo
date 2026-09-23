@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
+import { restampHash } from './record-test-utils.js';
 
 function sub(cmd: Command, ...path: string[]): Command {
   let current = cmd;
@@ -43,13 +44,13 @@ describe('ruflo record phase-check', () => {
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
     if (reqStatus === 'accepted') {
-      writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+      writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted')));
     }
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
     const { id, path: filePath } = task?.data as { id: string; path: string };
-    if (patch) writeFileSync(filePath, patch(readFileSync(filePath, 'utf8')));
+    if (patch) writeFileSync(filePath, restampHash(patch(readFileSync(filePath, 'utf8'))));
     return { id, filePath, reqPath };
   }
 
@@ -105,7 +106,7 @@ describe('ruflo record phase-check', () => {
         .replace('status: drafted', 'status: specified')
         .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\n---\n\n'),
     );
-    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: accepted', 'status: superseded'));
+    writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: accepted', 'status: superseded')));
 
     ctx.args = [];
     ctx.flags = { _: [] };
@@ -147,7 +148,7 @@ describe('ruflo record phase-check', () => {
         .replace('status: drafted', 'status: done')
         .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: []\n---\n\n'),
     );
-    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: accepted', 'status: superseded'));
+    writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: accepted', 'status: superseded')));
 
     ctx.args = [];
     ctx.flags = { _: [] };

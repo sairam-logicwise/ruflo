@@ -24,8 +24,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-import { parseRecordFile, serializeRecordFile, validateRecord, type Task } from '@claude-flow/docops';
-import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, buildVerificationReceipt } from './records-io.js';
+import { parseRecordFile, serializeRecordFile, validateRecord, computeContentHash, type Task } from '@claude-flow/docops';
+import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, buildVerificationReceipt, finalizeContentHash } from './records-io.js';
 import { verifyTask } from '../ruvector/test-runner.js';
 
 const taskVerifyCommand: Command = {
@@ -84,10 +84,18 @@ const taskVerifyCommand: Command = {
 
     // Review #3, C1: persist the real receipt a test run produced — never
     // discarded, so phase-check can audit verifying -> done against it.
-    const newFrontmatter: Record<string, unknown> = {
-      ...applyTaskTransition(frontmatter, transition),
-      ...(testRun ? { verification: buildVerificationReceipt(testRun, frontmatter.contentHash as string) } : {}),
-    };
+    // Review #3, Important 5: `verification` is excluded from what
+    // `computeContentHash` covers (content-hash.ts), so its own receipt
+    // hash can be computed from the patched (pre-verification) frontmatter
+    // and will still equal the record's finalized top-level contentHash.
+    const patched = applyTaskTransition(frontmatter, transition);
+    const newFrontmatter = finalizeContentHash(
+      {
+        ...patched,
+        ...(testRun ? { verification: buildVerificationReceipt(testRun, computeContentHash(patched, body)) } : {}),
+      },
+      body,
+    );
 
     const validatedNew = validateRecord(newFrontmatter, body);
     if (!validatedNew.success) {

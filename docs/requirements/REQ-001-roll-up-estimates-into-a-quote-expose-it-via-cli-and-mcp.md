@@ -5,7 +5,7 @@ status: accepted
 createdAt: 2026-09-23T07:16:21.228Z
 updatedAt: 2026-09-23T07:16:21.228Z
 citations: []
-contentHash: 1f641dada803d5eeba0af8687ee606b45e52b23bb85a1b9d9c62e7cf802fbf57
+contentHash: b5f6931ca382940f337310008b696418dedf872dd94e202dc24c3a83c0307b16
 provenance: human
 supersedes: []
 ---

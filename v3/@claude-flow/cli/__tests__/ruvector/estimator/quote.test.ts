@@ -28,23 +28,23 @@ describe('quote.ts', () => {
 
   function writeRequirement(id: string, title: string, filename = `${id}-x.md`): void {
     const body = `# ${title}\n\nSome requirement body.\n`;
-    const frontmatter = {
+    const fields = {
       id, title, status: 'accepted',
       createdAt: '2026-09-23T00:00:00.000Z', updatedAt: '2026-09-23T00:00:00.000Z',
-      citations: [], supersedes: [],
-      contentHash: computeContentHash(body), provenance: 'human',
+      citations: [], supersedes: [], provenance: 'human',
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     writeFileSync(join(reqDir, filename), serializeRecordFile(frontmatter, body));
   }
 
   function writeTask(id: string, title: string, citations: string[], extra: Record<string, unknown> = {}, body = `# ${title}\n\nA plain task body, nothing unusual.\n`): void {
-    const frontmatter = {
+    const fields = {
       id, title, status: 'drafted', priority: 'p2',
       createdAt: '2026-09-23T00:00:00.000Z', updatedAt: '2026-09-23T00:00:00.000Z',
-      citations, dependsOn: [],
-      contentHash: computeContentHash(body), provenance: 'agent-inferred',
+      citations, dependsOn: [], provenance: 'agent-inferred',
       ...extra,
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     writeFileSync(join(taskDir, `${id}-x.md`), serializeRecordFile(frontmatter, body));
   }
 

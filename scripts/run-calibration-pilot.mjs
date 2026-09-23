@@ -311,7 +311,7 @@ export function writeTaskRecord(ctx, task, response, actuals) {
   // fake point estimate, matching AD-6's own "never a point estimate" rule.
   const totalTokens = actuals.inputTokens + actuals.outputTokens;
   return claimAndWriteRecord(dir, RECORD_PREFIXES.task, slug, (id) => {
-    const frontmatter = {
+    const fields = {
       id,
       title: task.title,
       status: 'done',
@@ -327,9 +327,10 @@ export function writeTaskRecord(ctx, task, response, actuals) {
       },
       doneCriteria: { testLayers: [] }, // a proposal/explanation, not code this repo's own suite runs — T18's own "empty list is a valid, deliberate choice"
       actuals,
-      contentHash: computeContentHash(body),
       provenance: 'agent-inferred',
     };
+    // Important 5, review #3: contentHash now covers the whole frontmatter.
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     // Passes `body` (T21 readability + content-hash drift, both real checks) so a bad record fails
     // loudly HERE, at write time, instead of writing successfully and only failing later at
     // `record validate` — found the gap the hard way: an earlier version of this call omitted
@@ -382,10 +383,16 @@ export async function runPilot({
       continue;
     }
 
+    // Review #3, C3/Important 11: this is the real pipeline path — a real
+    // LLM call, a real `usage` object — so this is genuinely `measured`,
+    // never `proxy`. `priceModel` is the price id it was actually priced
+    // against, already in scope.
     const actuals = {
       inputTokens: call.usage?.inputTokens ?? 0,
       outputTokens: call.usage?.outputTokens ?? 0,
       costUsd: call.usage ? costUsd(priceId, call.usage.inputTokens, call.usage.outputTokens) : 0,
+      source: 'measured',
+      priceModel: priceId,
     };
     spentUsd += actuals.costUsd;
 

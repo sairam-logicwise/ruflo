@@ -50,8 +50,11 @@ describe('parseRecordFile', () => {
 });
 
 describe('validateRecord — kind resolution from id prefix', () => {
+  // No body passed to validateRecord in this describe block — the hash
+  // check never runs (see the "frontmatter-only" test below), so these
+  // hashes only need the right FORMAT, not a real body match.
   it('resolves REQ- to the requirement schema', () => {
-    const hash = computeContentHash('body');
+    const hash = computeContentHash({}, 'body');
     const result = validateRecord({
       id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
       citations: [], contentHash: hash, provenance: 'human', supersedes: [],
@@ -60,7 +63,7 @@ describe('validateRecord — kind resolution from id prefix', () => {
   });
 
   it('resolves DEC- to the decision schema', () => {
-    const hash = computeContentHash('body');
+    const hash = computeContentHash({}, 'body');
     const result = validateRecord({
       id: 'DEC-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
       citations: [], contentHash: hash, provenance: 'human', supersedes: [], related: [],
@@ -69,7 +72,7 @@ describe('validateRecord — kind resolution from id prefix', () => {
   });
 
   it('resolves TASK- to the task schema and enforces its citation contract', () => {
-    const hash = computeContentHash('body');
+    const hash = computeContentHash({}, 'body');
     const result = validateRecord({
       id: 'TASK-001', title: 'x', status: 'drafted', priority: 'p1', createdAt: now, updatedAt: now,
       citations: [], dependsOn: [], contentHash: hash, provenance: 'human',
@@ -96,22 +99,31 @@ describe('validateRecord — kind resolution from id prefix', () => {
 
 describe('validateRecordFile — end to end on a real file string', () => {
   it('validates a well-formed task file', () => {
-    const hash = computeContentHash('Fix the two disagreeing price tables.\n');
+    const body = 'Fix the two disagreeing price tables.\n';
+    // The hash must cover the SAME frontmatter that ends up in the YAML
+    // below (Important 5, review-2026-09-23.md) — built as a real object
+    // first, hashed, then interpolated, rather than a hand-picked string,
+    // so the two can never silently drift apart.
+    const fields = {
+      id: 'TASK-012', title: 'Fix inherited pricing bugs', status: 'drafted', priority: 'p1',
+      createdAt: now, updatedAt: now, citations: ['REQ-002'], dependsOn: [], provenance: 'human',
+    };
+    const hash = computeContentHash(fields, body);
     const raw = recordFile(
       [
-        'id: TASK-012',
-        'title: Fix inherited pricing bugs',
-        'status: drafted',
-        'priority: p1',
-        `createdAt: ${now}`,
-        `updatedAt: ${now}`,
-        'citations: [REQ-002]',
+        `id: ${fields.id}`,
+        `title: ${fields.title}`,
+        `status: ${fields.status}`,
+        `priority: ${fields.priority}`,
+        `createdAt: ${fields.createdAt}`,
+        `updatedAt: ${fields.updatedAt}`,
+        `citations: [${fields.citations.join(', ')}]`,
         'dependsOn: []',
         `contentHash: ${hash}`,
-        'provenance: human',
+        `provenance: ${fields.provenance}`,
         '',
       ].join('\n'),
-      'Fix the two disagreeing price tables.\n',
+      body,
     );
     const result = validateRecordFile(raw);
     expect(result.success).toBe(true);
@@ -121,6 +133,8 @@ describe('validateRecordFile — end to end on a real file string', () => {
   });
 
   it('rejects a task file whose citations field is missing entirely', () => {
+    // Schema validation fails on the missing field before the hash check
+    // ever runs, so this hash only needs the right format.
     const raw = recordFile(
       [
         'id: TASK-013',
@@ -129,7 +143,7 @@ describe('validateRecordFile — end to end on a real file string', () => {
         'priority: p2',
         `createdAt: ${now}`,
         `updatedAt: ${now}`,
-        `contentHash: ${computeContentHash('x')}`,
+        `contentHash: ${computeContentHash({}, 'x')}`,
         'provenance: human',
         '',
       ].join('\n'),
@@ -141,17 +155,17 @@ describe('validateRecordFile — end to end on a real file string', () => {
 
 describe('serializeRecordFile — the write side (T4)', () => {
   it('round-trips: serialize then parse recovers the same frontmatter', () => {
-    const frontmatter = {
+    const fields = {
       id: 'REQ-042',
       title: 'A requirement with a colon: and quotes "like this"',
       status: 'draft',
       createdAt: now,
       updatedAt: now,
-      citations: [],
-      contentHash: computeContentHash('body'),
+      citations: [] as string[],
       provenance: 'human',
-      supersedes: [],
+      supersedes: [] as string[],
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, 'body') };
     const raw = serializeRecordFile(frontmatter, 'The body.\n');
     const { frontmatter: parsedBack, body } = parseRecordFile(raw);
     expect(parsedBack).toEqual(frontmatter);
@@ -184,11 +198,11 @@ describe('serializeRecordFile — the write side (T4)', () => {
     // ending style difference. This hard-blocked commits on Windows for
     // files nobody had touched.
     const body = '# Title\nSome content the contributor wrote.\n';
-    const frontmatter = {
+    const fields = {
       id: 'TASK-100', title: 'CRLF checkout', status: 'drafted', priority: 'p2',
-      createdAt: now, updatedAt: now, citations: ['REQ-001'], dependsOn: [],
-      contentHash: computeContentHash(body), provenance: 'human',
+      createdAt: now, updatedAt: now, citations: ['REQ-001'], dependsOn: [], provenance: 'human',
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     const lf = serializeRecordFile(frontmatter, body);
     const crlf = lf.replace(/\n/g, '\r\n');
 
@@ -200,12 +214,12 @@ describe('serializeRecordFile — the write side (T4)', () => {
   });
 
   it('a serialized record validates successfully', () => {
-    // contentHash must match the exact body passed to serializeRecordFile
-    // below ('do the thing\n', with the trailing newline) — now that
-    // content-hash drift detection is real (Important 4), a mismatched
-    // fixture here fails for the right reason, not silently.
+    // contentHash must match the exact frontmatter+body passed to
+    // serializeRecordFile below — now that content-hash drift detection
+    // covers the whole frontmatter (Important 5), a mismatched fixture
+    // here fails for the right reason, not silently.
     const body = 'do the thing\n';
-    const frontmatter = {
+    const fields = {
       id: 'TASK-099',
       title: 'Round-trip task',
       status: 'drafted',
@@ -213,10 +227,10 @@ describe('serializeRecordFile — the write side (T4)', () => {
       createdAt: now,
       updatedAt: now,
       citations: ['REQ-001'],
-      dependsOn: [],
-      contentHash: computeContentHash(body),
+      dependsOn: [] as string[],
       provenance: 'human',
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     const raw = serializeRecordFile(frontmatter, body);
     const result = validateRecordFile(raw);
     expect(result.success).toBe(true);
@@ -224,24 +238,23 @@ describe('serializeRecordFile — the write side (T4)', () => {
 });
 
 describe('content-hash drift detection (Important 4, review-2026-09-21.md)', () => {
-  it('validateRecord passes when contentHash matches the given body', () => {
+  it('validateRecord passes when contentHash matches the given frontmatter and body', () => {
     const body = 'The actual body.';
-    const result = validateRecord(
-      {
-        id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-        citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
-      },
-      body,
-    );
+    const fields = {
+      id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
+    const result = validateRecord({ ...fields, contentHash: computeContentHash(fields, body) }, body);
     expect(result.success).toBe(true);
   });
 
   it('validateRecord fails when contentHash does not match the given body (stale/fabricated hash)', () => {
+    const fields = {
+      id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
     const result = validateRecord(
-      {
-        id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-        citations: [], contentHash: computeContentHash('the original body'), provenance: 'human', supersedes: [],
-      },
+      { ...fields, contentHash: computeContentHash(fields, 'the original body') },
       'the body was edited by hand, but contentHash was not updated',
     );
     expect(result.success).toBe(false);
@@ -250,27 +263,49 @@ describe('content-hash drift detection (Important 4, review-2026-09-21.md)', () 
     }
   });
 
+  it('validateRecord fails when a GATE-RELEVANT FRONTMATTER field is hand-edited, body untouched (Important 5, review-2026-09-23.md — the whole point of the fix)', () => {
+    const body = 'The actual body.';
+    const fields = {
+      id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
+    const contentHash = computeContentHash(fields, body);
+    // Body-only hashing (the pre-fix behaviour) would have let this pass —
+    // the hash was computed from `fields` with status: 'draft', but the
+    // record now claims 'accepted' (both are valid RequirementStatus
+    // values, so this is a hash mismatch, not a schema rejection).
+    const result = validateRecord({ ...fields, status: 'accepted', contentHash }, body);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(ContentHashMismatchError);
+    }
+  });
+
   it('validateRecord skips hash checking entirely when no body is given (frontmatter-only check)', () => {
     // e.g. at creation time, where the hash was just computed from this
-    // exact body — checking it again would be a pure no-op.
+    // exact frontmatter+body — checking it again would be a pure no-op.
     const result = validateRecord({
       id: 'REQ-001', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-      citations: [], contentHash: computeContentHash('anything at all'), provenance: 'human', supersedes: [],
+      citations: [], contentHash: computeContentHash({}, 'anything at all'), provenance: 'human', supersedes: [],
     });
     expect(result.success).toBe(true);
   });
 
   it('validateRecordFile (the real end-to-end path) catches a hand-edited body with a stale hash', () => {
+    const fields = {
+      id: 'REQ-002', title: 'Drifted record', status: 'draft',
+      createdAt: now, updatedAt: now, citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
     const raw = recordFile(
       [
-        'id: REQ-002',
-        'title: Drifted record',
-        'status: draft',
-        `createdAt: ${now}`,
-        `updatedAt: ${now}`,
+        `id: ${fields.id}`,
+        `title: ${fields.title}`,
+        `status: ${fields.status}`,
+        `createdAt: ${fields.createdAt}`,
+        `updatedAt: ${fields.updatedAt}`,
         'citations: []',
-        `contentHash: ${computeContentHash('the original body')}`,
-        'provenance: human',
+        `contentHash: ${computeContentHash(fields, 'the original body')}`,
+        `provenance: ${fields.provenance}`,
         'supersedes: []',
         '',
       ].join('\n'),
@@ -287,13 +322,11 @@ describe('content-hash drift detection (Important 4, review-2026-09-21.md)', () 
 describe('readability gate (T21, agentic SDLC plan)', () => {
   it('validateRecord rejects a record whose body fails the readability check, with a useful message', () => {
     const body = 'This might possibly be updated prior to the release and then merged once it is reviewed by someone.';
-    const result = validateRecord(
-      {
-        id: 'REQ-003', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-        citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
-      },
-      body,
-    );
+    const fields = {
+      id: 'REQ-003', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
+    const result = validateRecord({ ...fields, contentHash: computeContentHash(fields, body) }, body);
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error).toBeInstanceOf(ReadabilityError);
@@ -306,15 +339,20 @@ describe('readability gate (T21, agentic SDLC plan)', () => {
   // and judged a false positive.
   it('readabilityWaived accepts a record that fails readability, and surfaces what was waived', () => {
     const body = 'This might possibly be updated prior to the release and then merged once it is reviewed by someone.';
-    const frontmatter = {
+    const fields = {
       id: 'REQ-003', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
 
     const rejected = validateRecord(frontmatter, body);
     expect(rejected.success).toBe(false); // unwaived: still rejected, same as before
 
-    const waived = validateRecord({ ...frontmatter, readabilityWaived: true }, body);
+    // readabilityWaived is itself a new frontmatter field — it must be
+    // part of what gets hashed too, so the waived variant needs its own hash.
+    const waivedFields = { ...fields, readabilityWaived: true };
+    const waivedFrontmatter = { ...waivedFields, contentHash: computeContentHash(waivedFields, body) };
+    const waived = validateRecord(waivedFrontmatter, body);
     expect(waived.success).toBe(true);
     if (waived.success) {
       expect(waived.waivedIssues).toBeDefined();
@@ -324,24 +362,27 @@ describe('readability gate (T21, agentic SDLC plan)', () => {
 
   it('validateRecord accepts a well-written body', () => {
     const body = 'This change fixes the pricing bug. It affects only the OpenRouter path.';
-    const result = validateRecord(
-      {
-        id: 'REQ-004', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-        citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
-      },
-      body,
-    );
+    const fields = {
+      id: 'REQ-004', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
+    };
+    const result = validateRecord({ ...fields, contentHash: computeContentHash(fields, body) }, body);
     expect(result.success).toBe(true);
   });
 
   it('jargon only fails validation when readabilityStrict is true on the record', () => {
     const body = 'Utilize the existing pipeline for this.';
-    const base = {
+    const fields = {
       id: 'REQ-005', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+      citations: [] as string[], provenance: 'human', supersedes: [] as string[],
     };
-    expect(validateRecord({ ...base, readabilityStrict: false }, body).success).toBe(true);
-    const strict = validateRecord({ ...base, readabilityStrict: true }, body);
+
+    const looseFields = { ...fields, readabilityStrict: false };
+    const loose = validateRecord({ ...looseFields, contentHash: computeContentHash(looseFields, body) }, body);
+    expect(loose.success).toBe(true);
+
+    const strictFields = { ...fields, readabilityStrict: true };
+    const strict = validateRecord({ ...strictFields, contentHash: computeContentHash(strictFields, body) }, body);
     expect(strict.success).toBe(false);
     if (!strict.success) expect(strict.error).toBeInstanceOf(ReadabilityError);
   });
@@ -350,23 +391,27 @@ describe('readability gate (T21, agentic SDLC plan)', () => {
     const body = 'This might possibly need review prior to merging.';
     const result = validateRecord({
       id: 'REQ-006', title: 'x', status: 'draft', createdAt: now, updatedAt: now,
-      citations: [], contentHash: computeContentHash(body), provenance: 'human', supersedes: [],
+      citations: [], contentHash: computeContentHash({}, body), provenance: 'human', supersedes: [],
     });
     expect(result.success).toBe(true);
   });
 
   it('validateRecordFile (the real end-to-end path) rejects a genuinely bad summary', () => {
     const body = 'The configuration might possibly need updating by the maintainer prior to release and then be merged once approved.';
+    const fields = {
+      id: 'DEC-002', title: 'A decision with bad prose', status: 'draft',
+      createdAt: now, updatedAt: now, citations: [] as string[], provenance: 'human', supersedes: [] as string[], related: [] as string[],
+    };
     const raw = recordFile(
       [
-        'id: DEC-002',
-        'title: A decision with bad prose',
-        'status: draft',
-        `createdAt: ${now}`,
-        `updatedAt: ${now}`,
+        `id: ${fields.id}`,
+        `title: ${fields.title}`,
+        `status: ${fields.status}`,
+        `createdAt: ${fields.createdAt}`,
+        `updatedAt: ${fields.updatedAt}`,
         'citations: []',
-        `contentHash: ${computeContentHash(body)}`,
-        'provenance: human',
+        `contentHash: ${computeContentHash(fields, body)}`,
+        `provenance: ${fields.provenance}`,
         'supersedes: []',
         'related: []',
         '',

@@ -244,7 +244,7 @@ describe('loadCalibrationRows', () => {
 
   function writeTaskFile(filename: string, extra: Record<string, unknown>): void {
     const body = '# A task\n\nSimple, short body.\n';
-    const frontmatter = {
+    const fields = {
       id: 'TASK-001',
       title: 'A task',
       status: 'done',
@@ -253,10 +253,10 @@ describe('loadCalibrationRows', () => {
       updatedAt: '2026-09-23T00:00:00.000Z',
       citations: ['REQ-001'],
       dependsOn: [],
-      contentHash: computeContentHash(body),
       provenance: 'agent-inferred',
       ...extra,
     };
+    const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
     writeFileSync(join(tasksDir, filename), serializeRecordFile(frontmatter, body));
   }
 

@@ -161,7 +161,7 @@ function writeProposalsAsTasks(
       : `${proposal.body.trim()}\n`;
     const slug = slugify(proposal.title);
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.task, slug, (id) => {
-      const frontmatter = {
+      const fields = {
         id,
         title: proposal.title,
         status: 'drafted',
@@ -171,9 +171,9 @@ function writeProposalsAsTasks(
         citations: [requirementId],
         dependsOn: [],
         doneCriteria: proposal.doneCriteria,
-        contentHash: computeContentHash(body),
         provenance: 'agent-inferred',
       };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };

@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
+import { restampHash } from './record-test-utils.js';
 
 vi.mock('../src/ruvector/test-runner.js', () => ({ verifyTask: vi.fn() }));
 
@@ -54,7 +55,7 @@ describe('ruflo record task verify', () => {
     // command's own wiring, not about how a task legitimately reaches
     // "verifying" (T15/T16's concern).
     const raw = readFileSync(filePath, 'utf8').replace('status: drafted', `status: ${status}`);
-    writeFileSync(filePath, raw);
+    writeFileSync(filePath, restampHash(raw));
     return { id, filePath };
   }
 
@@ -84,7 +85,7 @@ describe('ruflo record task verify', () => {
     const { id, filePath } = await createTaskInState('verifying');
     let raw = readFileSync(filePath, 'utf8');
     raw = raw.replace('---\n\n', 'blocked:\n  reason: old\n  unblockCondition: old\n  fromState: implementing\n---\n\n');
-    writeFileSync(filePath, raw);
+    writeFileSync(filePath, restampHash(raw));
 
     vi.mocked(verifyTask).mockResolvedValue({
       transition: { ok: true, to: 'done' },

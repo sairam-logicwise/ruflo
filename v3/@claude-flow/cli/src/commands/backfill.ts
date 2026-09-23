@@ -57,19 +57,19 @@ function writeProposalsAsRecords(
     const body = `${proposal.body.trim()}\n`;
     const slug = slugify(proposal.title);
     const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES[kind], slug, (id) => {
-      const frontmatter: Record<string, unknown> = {
+      const fields: Record<string, unknown> = {
         id,
         title: proposal.title,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
         citations: [],
-        contentHash: computeContentHash(body),
         provenance: 'agent-inferred',
         confidence: proposal.confidence,
         supersedes: [],
         ...(kind === 'decision' ? { related: [] } : {}),
       };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
       const result = validateRecord(frontmatter, body);
       if (!result.success) return { error: formatValidationError(result.error) };
       return { content: serializeRecordFile(frontmatter, body) };

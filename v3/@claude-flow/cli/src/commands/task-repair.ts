@@ -27,8 +27,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-import { parseRecordFile, serializeRecordFile, validateRecord, type Task, type TransitionResult } from '@claude-flow/docops';
-import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, buildRepairActuals, buildVerificationReceipt } from './records-io.js';
+import { parseRecordFile, serializeRecordFile, validateRecord, computeContentHash, type Task, type TransitionResult } from '@claude-flow/docops';
+import { kindDir, findRecordPath, formatValidationError, applyTaskTransition, buildRepairActuals, buildVerificationReceipt, finalizeContentHash } from './records-io.js';
 import { verifyTask, resolveTestCommand, type TestRunResult } from '../ruvector/test-runner.js';
 import { runRepairLoop } from '../ruvector/repair-loop.js';
 
@@ -127,11 +127,13 @@ const taskRepairCommand: Command = {
     // rather than done (TASK-026's own acceptance criterion).
     const repairActuals = buildRepairActuals(repairResult);
     // Review #3, C1: the re-verify's own real receipt, persisted the same way task-verify.ts does.
-    const newFrontmatter: Record<string, unknown> = {
-      ...applyTaskTransition(frontmatter, transition),
-      ...(repairActuals ? { actuals: repairActuals } : {}),
-      ...(testRun ? { verification: buildVerificationReceipt(testRun, frontmatter.contentHash as string) } : {}),
-    };
+    // Review #3, Important 5: see task-verify.ts — `verification` is hash-excluded, so its
+    // receipt hash can come from the pre-verification patch and still match the finalized record.
+    const patched = { ...applyTaskTransition(frontmatter, transition), ...(repairActuals ? { actuals: repairActuals } : {}) };
+    const newFrontmatter = finalizeContentHash(
+      { ...patched, ...(testRun ? { verification: buildVerificationReceipt(testRun, computeContentHash(patched, body)) } : {}) },
+      body,
+    );
     const validatedNew = validateRecord(newFrontmatter, body);
     if (!validatedNew.success) {
       output.printError('Refusing to write an invalid result', formatValidationError(validatedNew.error));

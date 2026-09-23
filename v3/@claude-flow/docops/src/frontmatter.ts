@@ -159,7 +159,7 @@ export function validateRecord(frontmatter: Record<string, unknown>, body?: stri
   if (!result.success) return { success: false, error: result.error };
 
   if (body !== undefined) {
-    const actualHash = computeContentHash(body);
+    const actualHash = computeContentHash(frontmatter, body);
     if (frontmatter.contentHash !== actualHash) {
       return { success: false, error: new ContentHashMismatchError(String(frontmatter.contentHash), actualHash) };
     }

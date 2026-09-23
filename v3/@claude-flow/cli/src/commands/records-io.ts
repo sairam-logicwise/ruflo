@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import type { CommandContext } from '../types.js';
-import { parseRecordFile, serializeRecordFile, validateRecord, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals, type VerificationReceipt } from '@claude-flow/docops';
+import { parseRecordFile, serializeRecordFile, validateRecord, computeContentHash, type RecordKind, type CitationAcceptance, type Task, type TransitionResult, type Actuals, type VerificationReceipt } from '@claude-flow/docops';
 import type { RepairLoopResult } from '../ruvector/repair-loop.js';
 import type { TestRunResult } from '../ruvector/test-runner.js';
 
@@ -151,6 +151,21 @@ export function applyTaskTransition(
 }
 
 /**
+ * Important 5, review #3: contentHash now covers the whole frontmatter,
+ * not just the body — so any real WRITE to an existing record (not just
+ * creation) must recompute it as the LAST step, after every other patch
+ * (`applyTaskTransition`'s status/blocked, `buildRepairActuals`'s
+ * actuals, `buildVerificationReceipt`'s verification) has already been
+ * merged in. `task-verify.ts`, `task-repair.ts`, and `run.ts`'s `write()`
+ * closure all call this once, right before `validateRecord`/
+ * `writeFileSync` — the single place this recompute happens, so it can
+ * never happen out of order relative to one of those merges.
+ */
+export function finalizeContentHash(frontmatter: Record<string, unknown>, body: string): Record<string, unknown> {
+  return { ...frontmatter, contentHash: computeContentHash(frontmatter, body) };
+}
+
+/**
  * T13: turns a repair loop's real spend into an `Actuals` patch —
  * `task-repair.ts` and `run.ts`'s repair branch both end a repair attempt
  * this same way, so it lives here once. Real cost with no real token data
@@ -247,7 +262,8 @@ export function confirmRecord(ctx: CommandContext, kind: 'requirement' | 'decisi
     return { ok: false, error: `${id} is "${frontmatter.status}", not "draft" — only a draft record can be confirmed` };
   }
 
-  const newFrontmatter: Record<string, unknown> = { ...frontmatter, status: 'accepted', updatedAt: new Date().toISOString() };
+  const patched: Record<string, unknown> = { ...frontmatter, status: 'accepted', updatedAt: new Date().toISOString() };
+  const newFrontmatter = finalizeContentHash(patched, body);
   const validated = validateRecord(newFrontmatter, body);
   if (!validated.success) return { ok: false, error: formatValidationError(validated.error) };
 
@@ -263,7 +279,7 @@ export function confirmRecord(ctx: CommandContext, kind: 'requirement' | 'decisi
  * computed from this body BEFORE serializeRecordFile silently trimmed it
  * for the file it actually wrote, so a --body-file starting with a blank
  * line failed its own hash check the moment it was created. Trimming here,
- * once, keeps every caller's `computeContentHash(body)` and
+ * once, keeps every caller's `computeContentHash(fields, body)` and
  * `serializeRecordFile(frontmatter, body)` looking at identical content.
  */
 export function resolveBody(ctx: CommandContext, fallbackTitle: string): string {

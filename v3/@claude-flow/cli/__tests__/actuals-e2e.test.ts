@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
+import { restampHash } from './record-test-utils.js';
 
 vi.mock('../src/ruvector/repair-loop.js', () => ({ runRepairLoop: vi.fn() }));
 vi.mock('../src/ruvector/test-runner.js', async () => {
@@ -61,7 +62,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
     ctx.flags = { title: 'req one', _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
-    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+    writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted')));
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
@@ -71,7 +72,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
       '---\n\n',
       'estimate:\n  lowTokens: 500\n  highTokens: 2000\n  confidence: 0.4\ndoneCriteria:\n  testLayers: []\n---\n\n',
     );
-    writeFileSync(filePath, patched);
+    writeFileSync(filePath, restampHash(patched));
     return { id, filePath };
   }
 
@@ -81,7 +82,7 @@ describe('actuals land in the record, drafted through to done and to blocked (TA
     ctx.flags = { _: [] };
     await runCommand.action!(ctx);
     expect(readFileSync(filePath, 'utf8')).toContain('status: implementing');
-    writeFileSync(filePath, readFileSync(filePath, 'utf8').replace('status: implementing', 'status: verifying'));
+    writeFileSync(filePath, restampHash(readFileSync(filePath, 'utf8').replace('status: implementing', 'status: verifying')));
   }
 
   it('drafted through to done: actuals hold the real repair spend, not fabricated numbers', async () => {

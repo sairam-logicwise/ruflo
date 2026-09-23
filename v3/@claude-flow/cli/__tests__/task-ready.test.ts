@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Command, CommandContext } from '../src/types.js';
 import { recordCommand } from '../src/commands/records.js';
+import { restampHash } from './record-test-utils.js';
 
 function sub(cmd: Command, ...path: string[]): Command {
   let current = cmd;
@@ -41,7 +42,7 @@ describe('ruflo record task ready', () => {
     ctx.flags = { title: 'req one', _: [] };
     const req = await sub(recordCommand, 'req', 'new').action!(ctx);
     const { id: reqId, path: reqPath } = req?.data as { id: string; path: string };
-    writeFileSync(reqPath, readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted'));
+    writeFileSync(reqPath, restampHash(readFileSync(reqPath, 'utf8').replace('status: draft', 'status: accepted')));
 
     ctx.flags = { title: 'a task', citations: reqId, _: [] };
     const task = await sub(recordCommand, 'task', 'new').action!(ctx);
@@ -49,7 +50,7 @@ describe('ruflo record task ready', () => {
     const patched = readFileSync(filePath, 'utf8')
       .replace('status: drafted', 'status: implementing')
       .replace('---\n\n', 'estimate:\n  lowTokens: 100\n  highTokens: 200\n  confidence: 0.5\ndoneCriteria:\n  testLayers: []\n---\n\n');
-    writeFileSync(filePath, patched);
+    writeFileSync(filePath, restampHash(patched));
     return { id, filePath };
   }
 
