@@ -66,7 +66,7 @@ importers:
     dependencies:
       '@claude-flow/cli':
         specifier: '>=3.5.0'
-        version: 3.42.4(@types/node@20.19.27)(typescript@5.9.3)
+        version: link:../cli
       agent-browser:
         specifier: ^0.37.1
         version: 0.37.1
@@ -150,6 +150,9 @@ importers:
       '@ruvector/rabitq-wasm':
         specifier: 0.1.0
         version: 0.1.0
+      '@ruvector/typesafe':
+        specifier: ^0.1.0
+        version: 0.1.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -213,7 +216,7 @@ importers:
         version: 2.0.0-alpha.5
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.23
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@metaharness/darwin':
         specifier: ~0.10.2
         version: 0.10.2
@@ -261,7 +264,7 @@ importers:
     dependencies:
       '@claude-flow/cli':
         specifier: ^3.0.0
-        version: 3.42.4(@types/node@20.19.27)(typescript@5.9.3)
+        version: link:../cli
       '@claude-flow/security':
         specifier: 3.0.0-alpha.14
         version: link:../security
@@ -382,7 +385,7 @@ importers:
         version: link:../hooks
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.2
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@claude-flow/shared':
         specifier: ^3.0.0-alpha.1
         version: link:../shared
@@ -401,7 +404,7 @@ importers:
     dependencies:
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.2
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@claude-flow/neural':
         specifier: ^3.0.0-alpha.2
         version: link:../neural
@@ -510,7 +513,7 @@ importers:
     dependencies:
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.16
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@ruvector/sona':
         specifier: 0.1.5
         version: 0.1.5
@@ -589,7 +592,7 @@ importers:
         version: link:../hooks
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.2
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@ruvector/learning-wasm':
         specifier: ^0.1.0
         version: 0.1.29
@@ -705,7 +708,7 @@ importers:
     devDependencies:
       '@claude-flow/memory':
         specifier: ^3.0.0-alpha.2
-        version: 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
+        version: link:../memory
       '@claude-flow/shared':
         specifier: ^3.0.0-alpha.1
         version: link:../shared
@@ -950,133 +953,6 @@ packages:
   /@borewit/text-codec@0.2.1:
     resolution: {integrity: sha512-k7vvKPbf7J2fZ5klGRD9AeKfUvojuZIQ3BT5u7Jfv+puwXkUBUT5PVyMDfJZpy30CBDXGMgw7fguK/lpOMBvgw==}
     requiresBuild: true
-
-  /@claude-flow/cli-core@3.7.0-alpha.5:
-    resolution: {integrity: sha512-WbhpxGpxhRoVmjtizIdt2IGlcX0nPmGktXe3JDtII4MeVTgifHuBYpx4cX4EQiBqGCt4cxxM4nDOFQUUqAK9Aw==}
-    hasBin: true
-    dev: false
-
-  /@claude-flow/cli@3.42.4(@types/node@20.19.27)(typescript@5.9.3):
-    resolution: {integrity: sha512-k1Olv5X1TZLbKYEDmK+TMDWmixOb+XtaTh/9G1NOPOdYbwrhhKBbWk7M9kyziK3Nd8+L80mTyyANgZP0n20ETQ==}
-    hasBin: true
-    requiresBuild: true
-    peerDependencies:
-      '@metaharness/router': ^0.4.0
-      metaharness: ^0.4.1
-    peerDependenciesMeta:
-      '@metaharness/router':
-        optional: true
-      metaharness:
-        optional: true
-    dependencies:
-      '@claude-flow/cli-core': 3.7.0-alpha.5
-      '@claude-flow/neural': 3.0.0-alpha.9(@types/node@20.19.27)(zod@3.25.76)
-      '@claude-flow/shared': 3.0.0-alpha.7
-      '@iarna/toml': 2.2.5
-      '@noble/ed25519': 2.3.0
-      '@ruvector/rabitq-wasm': 0.1.0
-      ajv: 8.20.0
-      bcryptjs: 3.0.3
-      chalk: 5.6.2
-      commander: 12.1.0
-      cors: 2.8.6
-      express: 5.2.1
-      express-rate-limit: 8.6.2(express@5.2.1)
-      fast-uri: 3.1.7
-      fs-extra: 11.3.3
-      helmet: 7.2.0
-      inquirer: 9.3.8(@types/node@20.19.27)
-      semver: 7.7.3
-      sql.js: 1.14.1
-      toml: 3.0.0
-      ws: 8.21.1
-      yaml: 2.9.0
-      zod: 3.25.76
-    optionalDependencies:
-      '@agntcy/slim-bindings': 2.0.0-alpha.5
-      '@claude-flow/memory': 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
-      '@metaharness/darwin': 0.10.2
-      '@metaharness/flywheel': 0.1.10
-      '@metaharness/radio': 0.1.0
-      '@metaharness/turn-credit': 0.1.0
-      '@napi-rs/keyring': 1.3.0
-      agentdb: 3.0.0-alpha.17(@types/node@20.19.27)(zod@3.25.76)
-      agentic-flow: 3.0.0-alpha.2
-      better-sqlite3: 12.9.0
-      nostr-tools: 2.25.2(typescript@5.9.3)
-      ruvector: 0.2.27(zod@3.25.76)
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - '@modelcontextprotocol/sdk'
-      - '@ruvector/diskann'
-      - '@ruvector/pi-brain'
-      - '@ruvector/router'
-      - '@ruvector/ruvllm'
-      - '@types/node'
-      - '@valibot/to-json-schema'
-      - arktype
-      - bare-abort-controller
-      - bare-buffer
-      - bufferutil
-      - debug
-      - effect
-      - jose
-      - react-native-b4a
-      - supports-color
-      - sury
-      - typescript
-      - utf-8-validate
-    dev: false
-    bundledDependencies:
-      - '@claude-flow/codex'
-      - '@claude-flow/mcp'
-      - '@claude-flow/plugin-agent-federation'
-      - '@claude-flow/security'
-
-  /@claude-flow/memory@3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76):
-    resolution: {integrity: sha512-V0ca9Nh7VusKbzjS+h59lnpBDKe4ZoQ0kYzYVzXypBYuvuhNF6ngRARbA/ZXCYwO7Uh85BNkQSGRe45TmOKjBg==}
-    cpu: [x64, arm64]
-    os: [darwin, linux, win32]
-    dependencies:
-      '@claude-flow/security': 3.0.0-alpha.12
-      agentdb: 3.0.0-alpha.17(@types/node@20.19.27)(zod@3.25.76)
-      sql.js: 1.14.1
-    optionalDependencies:
-      better-sqlite3: 12.9.0
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - '@types/node'
-      - bare-abort-controller
-      - bare-buffer
-      - react-native-b4a
-      - supports-color
-      - zod
-
-  /@claude-flow/neural@3.0.0-alpha.9(@types/node@20.19.27)(zod@3.25.76):
-    resolution: {integrity: sha512-u7mx6rQxHrpCyKVtP600QorSJrEhoqYEyGZgYVU1kGWwYitScJH3rzWzss95Dn+RazcCAk7yElEG/iSbhtxU6g==}
-    dependencies:
-      '@claude-flow/memory': 3.0.0-alpha.24(@types/node@20.19.27)(zod@3.25.76)
-      '@ruvector/sona': 0.1.5
-    optionalDependencies:
-      agentdb: 3.0.0-alpha.17(@types/node@20.19.27)(zod@3.25.76)
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - '@types/node'
-      - bare-abort-controller
-      - bare-buffer
-      - react-native-b4a
-      - supports-color
-      - zod
-    dev: false
-
-  /@claude-flow/security@3.0.0-alpha.12:
-    resolution: {integrity: sha512-/b1V6zXOhFSs+Y8UztyPFHqkNjDKslwpAn9+KJFWHqZMwnnPnBnW0WQHoZAGx+5+rewI619pVT9gIANkyt3luQ==}
-    dependencies:
-      '@noble/ed25519': 2.3.0
-      bcryptjs: 3.0.3
-      zod: 3.25.76
-    optionalDependencies:
-      '@napi-rs/keyring': 1.3.0
 
   /@claude-flow/shared@3.0.0-alpha.7:
     resolution: {integrity: sha512-5iehTHguBFjlyZqy+fRoKfZVL/nFeE93A94nUUKJvu8y7AmhfpVqtQAZbmKztwQGJ5rv7iBb3Kwl1MUo3K5QkA==}
@@ -1875,7 +1751,7 @@ packages:
     dependencies:
       '@types/node': 20.19.27
       chardet: 2.1.1
-      iconv-lite: 0.7.2
+      iconv-lite: 0.7.1
 
   /@inquirer/figures@1.0.15:
     resolution: {integrity: sha512-t2IEY+unGHOzAaVM5Xx6DEWKeXlDDcNPeDyUpsRc6CUhBfU3VQOEl+Vssh7VNp1dR8MdUJBWhuObjXCsVpjN5g==}
@@ -6285,6 +6161,12 @@ packages:
       '@ruvector/tiny-dancer-win32-arm64-msvc': 0.1.22
       '@ruvector/tiny-dancer-win32-x64-msvc': 0.1.22
 
+  /@ruvector/typesafe@0.1.0:
+    resolution: {integrity: sha512-PEEabuznFjxABV9P7qC140N9zZYYi1THWPpyFi/7DB8P21VCZqBU1fKZ690jqWcgEe9tEfW9pIiI1nIrCSzVCA==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+    dev: false
+
   /@ruvector/wasm@0.1.16:
     resolution: {integrity: sha512-BvtXLvBDxDxsnFVIi7rsRE8AvPxYOWqHvj8PUOEb3TfsCWBEA2gT5VodMJEv+DWx/mVqdongxRkuHGlVcK9pug==}
     dev: false
@@ -7036,7 +6918,7 @@ packages:
       obug: 2.1.1
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.8(@types/node@20.19.27)(@vitest/coverage-v8@4.1.9)(vite@7.3.0)
+      vitest: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(@vitest/coverage-v8@4.1.9)(vite@7.3.0)
     dev: true
 
   /@vitest/expect@4.1.8:
@@ -7157,12 +7039,18 @@ packages:
       acorn: 8.16.0
     optional: true
 
-  /acorn-jsx@5.3.2(acorn@8.16.0):
+  /acorn-jsx@5.3.2(acorn@8.15.0):
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
     peerDependencies:
       acorn: ^6.0.0 || ^7.0.0 || ^8.0.0
     dependencies:
-      acorn: 8.16.0
+      acorn: 8.15.0
+    dev: true
+
+  /acorn@8.15.0:
+    resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
     dev: true
 
   /acorn@8.16.0:
@@ -7170,6 +7058,7 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
     requiresBuild: true
+    optional: true
 
   /adm-zip@0.5.16:
     resolution: {integrity: sha512-TGw5yVi4saajsSEgz25grObGHEUaDrniwvA2qwSC060KfqGPdglhvPMA2lPIoxs3PQIItj2iag35fONcQqgUaQ==}
@@ -7248,7 +7137,7 @@ packages:
       '@ruvector/router': 0.1.26
       '@ruvector/ruvllm': 2.6.0
       '@ruvector/sona': 0.1.5
-      ajv: 8.20.0
+      ajv: 8.17.1
       chalk: 5.6.2
       cli-table3: 0.6.5
       commander: 12.1.0
@@ -7977,7 +7866,6 @@ packages:
 
   /b4a@1.7.3:
     resolution: {integrity: sha512-5Q2mfq2WfGuFp3uS//0s6baOJLMoVduPYVeNmDYxu5OUA1/cBfvr2RIS7vi62LdNj/urk1hfmj867I3qt6uZ7Q==}
-    requiresBuild: true
     peerDependencies:
       react-native-b4a: '*'
     peerDependenciesMeta:
@@ -8998,8 +8886,8 @@ packages:
     resolution: {integrity: sha512-oruZaFkjorTpF32kDSI5/75ViwGeZginGGy2NoOSg3Q9bnwlnmDm4HLnkl0RE3n+njDXR037aY1+x58Z/zFdwQ==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
     dependencies:
-      acorn: 8.16.0
-      acorn-jsx: 5.3.2(acorn@8.16.0)
+      acorn: 8.15.0
+      acorn-jsx: 5.3.2(acorn@8.15.0)
       eslint-visitor-keys: 3.4.3
     dev: true
 
@@ -9184,7 +9072,6 @@ packages:
 
   /fast-fifo@1.3.2:
     resolution: {integrity: sha512-/d9sfos4yxzpwkDkuN7k2SqFKtYNmCTzgfEpz82x34IM9/zc8KGxQoXg1liNC/izpRM/MBdt44Nmx41ZWqk+FQ==}
-    requiresBuild: true
 
   /fast-json-stable-stringify@2.1.0:
     resolution: {integrity: sha512-lhd/wF+Lk98HZoTCtlVraHtfh5XYijIjalXck7saUtuanSDyLMxnHhSXEDJqHxD7msR8D0uCmqlkwjCV8xvwHw==}
@@ -9435,7 +9322,6 @@ packages:
 
   /fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
-    requiresBuild: true
 
   /fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -9527,9 +9413,14 @@ packages:
     resolution: {integrity: sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==}
     engines: {node: 6.* || 8.* || >= 10.*}
 
+  /get-east-asian-width@1.4.0:
+    resolution: {integrity: sha512-QZjmEOC+IT1uk6Rx0sX22V6uHWVwbdbxf1faPqJ1QhLdGgsRGCZoyaQBm/piRdJy/D2um6hM1UP7ZEeQ4EkP+Q==}
+    engines: {node: '>=18'}
+
   /get-east-asian-width@1.5.0:
     resolution: {integrity: sha512-CQ+bEO+Tva/qlmw24dCejulK5pMzVnUOFOijVogd3KQs07HnRIgp8TGipvCCRT06xeYEbpbgwaCxglFyiuIcmA==}
     engines: {node: '>=18'}
+    dev: false
 
   /get-intrinsic@1.3.0:
     resolution: {integrity: sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==}
@@ -9621,7 +9512,6 @@ packages:
   /glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
-    requiresBuild: true
     dependencies:
       fs.realpath: 1.0.0
       inflight: 1.0.6
@@ -9928,6 +9818,12 @@ packages:
     dev: false
     optional: true
 
+  /iconv-lite@0.7.1:
+    resolution: {integrity: sha512-2Tth85cXwGFHfvRgZWszZSvdo+0Xsqmw8k8ZwxScfcBneNUraK+dxRxRm24nszx80Y0TVio8kKLt5sLE7ZCLlw==}
+    engines: {node: '>=0.10.0'}
+    dependencies:
+      safer-buffer: 2.1.2
+
   /iconv-lite@0.7.2:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
@@ -10012,7 +9908,6 @@ packages:
   /inflight@1.0.6:
     resolution: {integrity: sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==}
     deprecated: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
-    requiresBuild: true
     dependencies:
       once: 1.4.0
       wrappy: 1.0.2
@@ -10835,7 +10730,7 @@ packages:
   /mlly@1.8.0:
     resolution: {integrity: sha512-l8D9ODSRWLe2KHJSifWGwBqpTZXIXTeo8mlKjY+E2HAakaTeNpqAyBZ8GSqLzHgw4XmHmC8whvpjJNMbFZN7/g==}
     dependencies:
-      acorn: 8.16.0
+      acorn: 8.15.0
       pathe: 2.0.3
       pkg-types: 1.3.1
       ufo: 1.6.1
@@ -11461,7 +11356,6 @@ packages:
   /path-is-absolute@1.0.1:
     resolution: {integrity: sha512-AVbw3UJ2e9bq64vSaS9Am0fje1Pa8pbGqTTsmXfaIiMpnr5DlDhfJOuLj9Sf95ZPVDAUerDfEk88MPmPe7UCQg==}
     engines: {node: '>=0.10.0'}
-    requiresBuild: true
 
   /path-key@3.1.1:
     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
@@ -12619,7 +12513,6 @@ packages:
 
   /streamx@2.23.0:
     resolution: {integrity: sha512-kn+e44esVfn2Fa/O0CPFcex27fjIL6MkVae0Mm6q+E6f0hWv578YCERbv+4m02cjxvDsPKLnmxral/rR6lBMAg==}
-    requiresBuild: true
     dependencies:
       events-universal: 1.0.1
       fast-fifo: 1.3.2
@@ -12662,7 +12555,7 @@ packages:
     engines: {node: '>=18'}
     dependencies:
       emoji-regex: 10.6.0
-      get-east-asian-width: 1.5.0
+      get-east-asian-width: 1.4.0
       strip-ansi: 7.2.0
 
   /string-width@8.2.0:
@@ -13410,73 +13303,6 @@ packages:
       - msw
     dev: true
 
-  /vitest@4.1.8(@types/node@20.19.27)(@vitest/coverage-v8@4.1.9)(vite@7.3.0):
-    resolution: {integrity: sha512-flY6ScbCIt9HThs+C5HS7jvGOB560DJtk/Z15IQROTA6zEy49Nh8T/dofWTQL+n3vswqn87sbJNiuqw1SDp5Ig==}
-    engines: {node: ^20.0.0 || ^22.0.0 || >=24.0.0}
-    hasBin: true
-    peerDependencies:
-      '@edge-runtime/vm': '*'
-      '@opentelemetry/api': ^1.9.0
-      '@types/node': ^20.0.0 || ^22.0.0 || >=24.0.0
-      '@vitest/browser-playwright': 4.1.8
-      '@vitest/browser-preview': 4.1.8
-      '@vitest/browser-webdriverio': 4.1.8
-      '@vitest/coverage-istanbul': 4.1.8
-      '@vitest/coverage-v8': '>=4.1.0'
-      '@vitest/ui': 4.1.8
-      happy-dom: '*'
-      jsdom: '*'
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
-    peerDependenciesMeta:
-      '@edge-runtime/vm':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@types/node':
-        optional: true
-      '@vitest/browser-playwright':
-        optional: true
-      '@vitest/browser-preview':
-        optional: true
-      '@vitest/browser-webdriverio':
-        optional: true
-      '@vitest/coverage-istanbul':
-        optional: true
-      '@vitest/coverage-v8':
-        optional: true
-      '@vitest/ui':
-        optional: true
-      happy-dom:
-        optional: true
-      jsdom:
-        optional: true
-    dependencies:
-      '@types/node': 20.19.27
-      '@vitest/coverage-v8': 4.1.9(vitest@4.1.8)
-      '@vitest/expect': 4.1.8
-      '@vitest/mocker': 4.1.8(vite@7.3.0)
-      '@vitest/pretty-format': 4.1.8
-      '@vitest/runner': 4.1.8
-      '@vitest/snapshot': 4.1.8
-      '@vitest/spy': 4.1.8
-      '@vitest/utils': 4.1.8
-      es-module-lexer: 2.1.0
-      expect-type: 1.3.0
-      magic-string: 0.30.21
-      obug: 2.1.1
-      pathe: 2.0.3
-      picomatch: 4.0.3
-      std-env: 4.1.0
-      tinybench: 2.9.0
-      tinyexec: 1.0.2
-      tinyglobby: 0.2.15
-      tinyrainbow: 3.1.0
-      vite: 7.3.0(@types/node@20.19.27)(tsx@4.21.0)(yaml@2.8.2)
-      why-is-node-running: 2.3.0
-    transitivePeerDependencies:
-      - msw
-    dev: true
-
   /wcwidth@1.0.1:
     resolution: {integrity: sha512-XHPEwS0q6TaxcvG85+8EYkbiCux2XtWG2mkc47Ng2A77BQu9+DqIOJldST4HgPkuea7dvKSj5VgX3P1d4rW8Tg==}
     dependencies:
@@ -13695,6 +13521,7 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
     requiresBuild: true
+    optional: true
 
   /yargs-parser@20.2.9:
     resolution: {integrity: sha512-y11nGElTIV+CT3Zv9t7VKl+Q3hTQoT9a1Qzezhhl6Rp21gJ/IVTW7Z3y9EWXhuUBC2Shnf+DX0antecpAwSP8w==}

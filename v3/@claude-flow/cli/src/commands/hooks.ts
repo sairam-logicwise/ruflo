@@ -2189,9 +2189,12 @@ const postTaskCommand: Command = {
         duration: number;
         learningUpdates: {
           patternsUpdated: number;
-          newPatterns: number;
-          trajectoryId: string;
+          newPatterns: number | null;
+          trajectoryId: string | null;
+          available?: boolean;
+          reason?: string;
         };
+        trajectory?: { recorded: boolean };
       }>('hooks_post-task', {
         taskId,
         success,
@@ -2222,6 +2225,13 @@ const postTaskCommand: Command = {
       output.writeln();
       output.printSuccess(`Task outcome recorded: ${success ? 'SUCCESS' : 'FAILED'}`);
 
+      // #3353: only show observed learning results; say so when degraded.
+      const lu = result.learningUpdates;
+      if (lu.available === false) {
+        output.writeln();
+        output.printWarning(`Learning degraded: ${lu.reason ?? 'feedback not recorded'} — no pattern updates were observed`);
+      }
+
       output.writeln();
       output.writeln(output.bold('Learning Updates'));
       output.printTable({
@@ -2230,10 +2240,10 @@ const postTaskCommand: Command = {
           { key: 'value', header: 'Value', width: 20, align: 'right' }
         ],
         data: [
-          { metric: 'Patterns Updated', value: result.learningUpdates.patternsUpdated },
-          { metric: 'New Patterns', value: result.learningUpdates.newPatterns },
+          { metric: 'Patterns Updated', value: lu.patternsUpdated },
+          { metric: 'New Patterns', value: lu.newPatterns ?? 'unknown' },
+          { metric: 'Trajectory Recorded', value: result.trajectory ? (result.trajectory.recorded ? 'yes' : 'no') : 'unknown' },
           { metric: 'Duration', value: `${(result.duration / 1000).toFixed(1)}s` },
-          { metric: 'Trajectory ID', value: result.learningUpdates.trajectoryId }
         ]
       });
 
