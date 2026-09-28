@@ -27,6 +27,7 @@
   "devDependencies": {
     "@claude-flow/shared": "workspace:*",
     "typescript": "^5.4.0",
+    "undici": "^7.0.0",
     "vitest": "^4.1.0"
   },
   "peerDependencies": {
