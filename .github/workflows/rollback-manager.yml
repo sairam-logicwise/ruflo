@@ -186,7 +186,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          # No cache: this was the only remaining cache-populating step in
+          # the workflow, and CodeQL (actions/cache-poisoning/poisonable-step)
+          # flagged the later post-rollback-verification job's steps as able
+          # to poison it (that job checks out an arbitrary, caller-supplied
+          # ref). Removing it here means there's no cache anywhere in this
+          # file left to poison.
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps

@@ -19,9 +19,21 @@ const execFileAsync = promisify(execFile);
 // argument escaping intact and avoids both ENOENT and EINVAL.
 const isWindows = process.platform === 'win32';
 
+// cmd.exe expands `%VAR%` sequences while parsing its command line — even
+// inside quoted arguments — regardless of Node's own argv quoting. Any
+// argument containing `%` (an env var name, a config path, a malformed
+// package spec) could get silently substituted with an environment
+// variable's value before npm ever sees it (CodeQL
+// js/shell-command-injection-from-environment). Doubling `%` to `%%` is
+// cmd.exe's own escape for a literal percent, so this closes that off
+// regardless of where the argument originated.
+function escapeCmdPercent(arg: string): string {
+  return arg.replace(/%/g, '%%');
+}
+
 function runNpm(args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
   if (isWindows) {
-    return execFileAsync('cmd.exe', ['/d', '/s', '/c', 'npm', ...args], { timeout: timeoutMs });
+    return execFileAsync('cmd.exe', ['/d', '/s', '/c', 'npm', ...args.map(escapeCmdPercent)], { timeout: timeoutMs });
   }
   return execFileAsync('npm', args, { timeout: timeoutMs });
 }

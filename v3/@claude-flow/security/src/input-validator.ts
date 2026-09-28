@@ -347,12 +347,22 @@ export const ExecutorConfigSchema = z.object({
  * Sanitizes a string by removing dangerous characters
  */
 export function sanitizeString(input: string): string {
-  return input
-    .replace(/\0/g, '')           // Remove null bytes
-    .replace(/[<>]/g, '')          // Remove HTML brackets
-    .replace(/javascript:/gi, '')  // Remove javascript: protocol
-    .replace(/data:/gi, '')        // Remove data: protocol
-    .trim();
+  let result = input.replace(/\0/g, '').trim(); // Remove null bytes
+
+  // A single non-overlapping pass of each replace can be bypassed by
+  // nesting the forbidden token (e.g. "javascriptjavascript::" strips to
+  // "javascript:"), which CodeQL flags as incomplete sanitization /
+  // incomplete URL-scheme check. Loop to a fixed point instead.
+  let previous: string;
+  do {
+    previous = result;
+    result = result
+      .replace(/[<>]/g, '')          // Remove HTML brackets
+      .replace(/javascript:/gi, '')  // Remove javascript: protocol
+      .replace(/data:/gi, '');       // Remove data: protocol
+  } while (result !== previous);
+
+  return result;
 }
 
 /**

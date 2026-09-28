@@ -17,7 +17,7 @@
  * @module v3/security/token-generator
  */
 
-import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
+import { randomBytes, randomInt, createHmac, timingSafeEqual } from 'crypto';
 
 export interface TokenConfig {
   /**
@@ -197,11 +197,13 @@ export class TokenGenerator {
     expirationMinutes = 10,
     maxAttempts = 3
   ): VerificationCode {
-    const buffer = randomBytes(length);
+    // randomInt uses rejection sampling internally, so digits are uniform;
+    // `randomBytes(n)[i] % 10` is biased (256 % 10 !== 0) and was flagged by
+    // CodeQL (js/biased-cryptographic-random).
     let code = '';
 
     for (let i = 0; i < length; i++) {
-      code += (buffer[i] % 10).toString();
+      code += randomInt(0, 10).toString();
     }
 
     const now = new Date();
