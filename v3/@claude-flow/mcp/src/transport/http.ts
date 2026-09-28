@@ -575,12 +575,16 @@ export class HttpTransport extends EventEmitter implements ITransport {
       return { valid: false, error: 'Authorization header required' };
     }
 
-    const tokenMatch = auth.match(/^Bearer\s+(.+)$/i);
-    if (!tokenMatch) {
+    // Parse "Bearer <token>" without a regex — \s+ and .+ can both match
+    // whitespace, and that overlap is what CodeQL flags as polynomial-redos.
+    if (auth.slice(0, 6).toLowerCase() !== 'bearer') {
       return { valid: false, error: 'Invalid authorization format' };
     }
-
-    const token = tokenMatch[1];
+    const rest = auth.slice(6);
+    const token = rest.trimStart();
+    if (token.length === rest.length || !token) {
+      return { valid: false, error: 'Invalid authorization format' };
+    }
 
     if (this.config.auth?.tokens?.length) {
       // SECURITY: Use timing-safe comparison to prevent timing attacks

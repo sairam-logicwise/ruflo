@@ -19,6 +19,7 @@ import { createServer, Server } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import {
   ITransport,
   TransportType,
@@ -46,6 +47,10 @@ export interface HttpTransportConfig {
   auth?: AuthConfig;
   maxRequestSize?: string;
   requestTimeout?: number;
+  rateLimit?: {
+    windowMs?: number;
+    limit?: number;
+  };
 }
 
 /**
@@ -214,18 +219,59 @@ export class HttpTransport extends EventEmitter implements ITransport {
     // HTML; CodeQL js/insecure-helmet-configuration).
     this.app.use(helmet());
 
-    // CORS
+    // CORS - Secure defaults (no wildcard in production)
     if (this.config.corsEnabled !== false) {
+      const allowedOrigins = this.config.corsOrigins;
+
+      // SECURITY: Reject wildcard CORS in production unless explicitly configured
+      if (!allowedOrigins || allowedOrigins.length === 0) {
+        this.logger.warn('CORS: No origins configured, restricting to same-origin only');
+      }
+
       this.app.use(cors({
-        origin: this.config.corsOrigins || '*',
+        origin: (origin, callback) => {
+          // Allow requests with no origin (same-origin, curl, etc.)
+          if (!origin) {
+            callback(null, true);
+            return;
+          }
+
+          // Check against allowed origins
+          if (allowedOrigins && allowedOrigins.length > 0) {
+            if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+              callback(null, true);
+            } else {
+              callback(new Error(`CORS: Origin '${origin}' not allowed`));
+            }
+          } else {
+            // No origins configured - reject cross-origin requests
+            callback(new Error('CORS: Cross-origin requests not allowed'));
+          }
+        },
         credentials: true,
         maxAge: 86400,
+        methods: ['GET', 'POST', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
       }));
     }
 
     // Body parsing
     this.app.use(express.json({
       limit: this.config.maxRequestSize || '10mb',
+    }));
+
+    // Bound authenticated and unauthenticated RPC traffic before route-level
+    // authorization or request dispatch can consume significant resources.
+    this.app.use(['/rpc', '/mcp'], rateLimit({
+      windowMs: this.config.rateLimit?.windowMs ?? 60_000,
+      limit: this.config.rateLimit?.limit ?? 120,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      message: {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32000, message: 'Rate limit exceeded' },
+      },
     }));
 
     // Request timeout
@@ -515,12 +561,16 @@ export class HttpTransport extends EventEmitter implements ITransport {
       return { valid: false, error: 'Authorization header required' };
     }
 
-    const tokenMatch = auth.match(/^Bearer\s+(.+)$/i);
-    if (!tokenMatch) {
+    // Parse "Bearer <token>" without a regex — \s+ and .+ can both match
+    // whitespace, and that overlap is what CodeQL flags as polynomial-redos.
+    if (auth.slice(0, 6).toLowerCase() !== 'bearer') {
       return { valid: false, error: 'Invalid authorization format' };
     }
-
-    const token = tokenMatch[1];
+    const rest = auth.slice(6);
+    const token = rest.trimStart();
+    if (token.length === rest.length || !token) {
+      return { valid: false, error: 'Invalid authorization format' };
+    }
 
     if (this.config.auth?.tokens?.length) {
       // Use timing-safe comparison to prevent timing attacks
