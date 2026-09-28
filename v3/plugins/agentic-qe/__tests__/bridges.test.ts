@@ -184,11 +184,23 @@ class MockQESecurityBridge {
   }
 
   async sanitizeInput(input: string): Promise<string> {
-    // Remove potential XSS/injection patterns
-    return input
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/on\w+\s*=/gi, '');
+    // Remove potential XSS/injection patterns. Loop every pass to a fixed
+    // point so a nested/overlapping payload (e.g. "<scr<script>ipt>" or
+    // "javascriptjavascript::") can't survive a single non-overlapping pass,
+    // and match "javascript:" with optional whitespace/control characters
+    // between its letters since browsers ignore those when resolving a
+    // scheme (e.g. "java\tscript:" still executes).
+    let sanitized = input;
+    let previous: string;
+    do {
+      previous = sanitized;
+      sanitized = sanitized
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<\/?script[^>]*>/gi, '')
+        .replace(/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi, '')
+        .replace(/on\w+\s*=/gi, '');
+    } while (sanitized !== previous);
+    return sanitized;
   }
 
   async generateToken(): Promise<string> {

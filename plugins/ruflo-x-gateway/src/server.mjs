@@ -26,7 +26,7 @@ import { askSeraphina } from './seraphina.mjs';
 import { privacyPage, termsPage, supportPage } from './public-pages.mjs';
 import { fenceUntrusted, untrustedToolResult } from './untrusted.mjs';
 import { protectedResourceMetadata, challengeHeader, verifyAccessToken, hasScope, SCOPE_READ, SCOPE_PUBLISH } from './oauth.mjs';
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { registrationFromEnv, RegistrationError } from './registration.mjs';
 
 // Static public pages the OpenAI app review requires. Rendered once at module
@@ -47,6 +47,14 @@ const PUBLIC_PAGES = {
 // 0.7.0, so the suite shipped red). package.json is the one real source of
 // truth; read it rather than keeping a fourth copy in sync by hand.
 export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+// Keyed hash for pseudonymizing the OAuth subject in access logs. A bare
+// unsalted digest (e.g. plain sha256) would let anyone with log access
+// brute-force it back to the real subject; a per-process random key (or a
+// pinned secret, for correlating a subject across restarts) closes that
+// while keeping the value deterministic within a process so log lines for
+// the same subject still correlate.
+const LOG_SUBJECT_KEY = process.env.RUFLO_LOG_SUBJECT_SALT || randomBytes(32).toString('hex');
 
 export function createGateway({ relay, keyFile, port, registration } = {}) {
   const RELAY = relay || process.env.RUFLO_RELAY_URL || 'wss://relay.ruv.io';
@@ -443,7 +451,7 @@ export function createGateway({ relay, keyFile, port, registration } = {}) {
       if (rateLimited(req)) return res.writeHead(429, { 'content-type': 'application/json' }).end('{"error":"rate limited"}');
       const auth = await oauthContext(req);
       try {
-        const sub = auth.subject ? createHash('sha256').update(auth.subject).digest('hex').slice(0, 12) : '-';
+        const sub = auth.subject ? createHmac('sha256', LOG_SUBJECT_KEY).update(auth.subject).digest('hex').slice(0, 12) : '-';
         console.log(`mcp path=${url.pathname} auth=${auth.mode} scopes=${(auth.scopes || []).join('+') || '-'} sub=${sub}`
           + (auth.mode === 'denied' ? ` reason=${auth.error} aud=${auth.observedAudience || '-'}` : ''));
       } catch { /* diagnostic logging must never break a request */ }

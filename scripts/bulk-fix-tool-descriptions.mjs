@@ -157,8 +157,11 @@ for (const f of readdirSync(TOOLS_DIR).filter(n => n.endsWith('.ts') && !n.endsW
         return full;
       }
       const suffix = suffixFor(name);
-      // Need to JS-escape any single-quote in suffix (template is single-quote literal)
-      const safeSuffix = suffix.replace(/'/g, "\\'");
+      // Need to JS-escape any backslash/single-quote in suffix (template is a
+      // single-quote literal). Backslashes must be escaped FIRST, or an
+      // existing backslash in suffix would combine with the newly inserted
+      // one to unescape the quote that follows it.
+      const safeSuffix = suffix.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const newDesc = desc.replace(/\s+$/, '') + safeSuffix;
       fileChanged++;
       return `${before}${newDesc}${close}`;

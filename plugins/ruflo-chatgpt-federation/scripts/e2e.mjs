@@ -105,7 +105,15 @@ console.log('\noauth discovery');
     code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', code_challenge_method: 'S256',
     scope: 'federation:read federation:publish', state: 'e2e' });
   const html = await (await fetch(`${AS}/oauth/authorize?${q}`)).text().catch(() => '');
-  const text = html.replace(/<(script|style)[\s\S]*?<\/\1>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  // Loop tag-stripping to a fixed point so a malformed/nested tag (e.g.
+  // "<scr<script>ipt>") can't survive a single non-overlapping pass.
+  let stripped = html;
+  let prevStripped;
+  do {
+    prevStripped = stripped;
+    stripped = stripped.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '').replace(/<[^>]+>/g, ' ');
+  } while (stripped !== prevStripped);
+  const text = stripped.replace(/\s+/g, ' ');
   if (/Unknown client_id/.test(text)) {
     no(`AS knows client_id=${CLIENT_ID}`, 'Unknown client_id — the migration has not reached this database');
   } else if (/is requesting access/i.test(text)) {

@@ -247,12 +247,17 @@ function addInlineCitations(md: string, webSearchSources: SimpleSource[] = []): 
 
 function sanitizeHref(href?: string | null): string | undefined {
 	if (!href) return undefined;
-	const trimmed = href.trim();
-	const lower = trimmed.toLowerCase();
+	// Browsers ignore ASCII control characters (tabs, newlines, other C0
+	// controls) anywhere in a URL when resolving its scheme, so a value like
+	// "java\tscript:alert(1)" is still executed as javascript:. Strip them
+	// before checking AND before returning — checking a cleaned copy but
+	// returning the original would still let the raw bypass string through.
+	const cleaned = href.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+	const lower = cleaned.toLowerCase();
 	if (lower.startsWith("javascript:") || lower.startsWith("data:text/html")) {
 		return undefined;
 	}
-	return trimmed.replace(/>$/, "");
+	return cleaned.replace(/>$/, "");
 }
 
 function highlightCode(text: string, lang?: string): string {
