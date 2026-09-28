@@ -254,9 +254,17 @@ export class GitCommitHook {
 
     // Modify the command with the new message
     if (result.success && result.modifiedMessage !== message) {
+      // SECURITY: backslashes must be escaped BEFORE quotes. Escaping only
+      // `"` is an incomplete sanitization — a message ending in `\` (e.g.
+      // "fix path\") would leave that backslash in place, where it then
+      // escapes the shell's closing quote instead of being a literal
+      // character, breaking out of the quoted `-m` argument.
+      const escapedMessage = result.modifiedMessage
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"');
       const modifiedCommand = command.replace(
         /-m\s+["'][^"']+["']/,
-        `-m "${result.modifiedMessage.replace(/"/g, '\\"')}"`
+        `-m "${escapedMessage}"`
       );
 
       return {

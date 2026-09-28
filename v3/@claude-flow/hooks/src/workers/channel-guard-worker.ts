@@ -128,7 +128,12 @@ const INJECTION_PHRASES = [
   'do anything now',
 ] as const;
 
-const ROLE_SHIFT_RE = /(^|\n)\s*(system|assistant|user|developer)\s*:\s*/gi;
+// SECURITY: `\s*` runs are bounded ({0,N}) instead of unbounded so a
+// message with a long non-matching run of whitespace/newlines can't drive
+// this into quadratic backtracking (js/polynomial-redos) when scanned via
+// the unanchored `.exec()` loop below. No legitimate role marker has more
+// than a few characters of surrounding whitespace.
+const ROLE_SHIFT_RE = /(^|\n)\s{0,16}(system|assistant|user|developer)\s{0,16}:\s{0,16}/gi;
 const BASE64_RE = /\b[A-Za-z0-9+/]{80,}={0,2}/g;
 const HEX_RE = /\b(?:0x)?[a-f0-9]{60,}\b/gi;
 // Zero-width space/joiners, BOM, and bidi-override control characters.

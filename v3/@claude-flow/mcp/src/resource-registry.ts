@@ -361,6 +361,22 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
+   * Build a placeholder-matching regex source from an already-escaped
+   * template. Adjacent placeholders (e.g. `{a}{b}` with no literal text
+   * between them) would otherwise produce back-to-back `[^/]+[^/]+`
+   * groups — two unbounded quantifiers over the *same* character class,
+   * which is the textbook polynomial-redos shape (CodeQL js/polynomial-redos).
+   * Collapsing consecutive placeholder groups into one is a no-op for
+   * matching semantics (both require 1+ non-`/` chars in that span) and
+   * removes the ambiguity entirely.
+   */
+  private buildTemplatePattern(escapedTemplate: string): string {
+    return escapedTemplate
+      .replace(/\\\{[^}]+\\\}/g, '[^/]+')
+      .replace(/(?:\[\^\/\]\+)+/g, '[^/]+');
+  }
+
+  /**
    * Check if URI matches any template
    * SECURITY: Uses escaped regex to prevent ReDoS
    */
@@ -369,8 +385,7 @@ export class ResourceRegistry extends EventEmitter {
       // SECURITY: Escape regex metacharacters before converting template
       // First extract placeholders, escape the rest, then add placeholder pattern
       const escaped = this.escapeRegex(template);
-      // Replace escaped placeholder braces with the pattern
-      const pattern = escaped.replace(/\\\{[^}]+\\\}/g, '[^/]+');
+      const pattern = this.buildTemplatePattern(escaped);
       try {
         const regex = new RegExp('^' + pattern + '$');
         return regex.test(uri);
@@ -382,7 +397,7 @@ export class ResourceRegistry extends EventEmitter {
 
     for (const t of this.templates.keys()) {
       const escaped = this.escapeRegex(t);
-      const pattern = escaped.replace(/\\\{[^}]+\\\}/g, '[^/]+');
+      const pattern = this.buildTemplatePattern(escaped);
       try {
         const regex = new RegExp('^' + pattern + '$');
         if (regex.test(uri)) {

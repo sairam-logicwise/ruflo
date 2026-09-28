@@ -142,7 +142,10 @@ export function defaultQueryExpansions(query: string): string[] {
   }
 
   // Context-priming variant — helps when the query is short or imperative.
-  const words = trimmed.toLowerCase().replace(/[?.!]+$/, '');
+  // Bounded quantifier (instead of unbounded `+`) keeps this linear-time:
+  // an unanchored trailing-punctuation strip re-tried at every position of
+  // a long non-matching string is the js/polynomial-redos shape.
+  const words = trimmed.toLowerCase().replace(/[?.!]{1,32}$/, '');
   if (words && !words.startsWith('tell me')) {
     variants.add(`tell me about ${words}`);
   }

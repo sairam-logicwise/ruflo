@@ -5,6 +5,23 @@
 
 import { z } from 'zod';
 
+/**
+ * Apply a global replace repeatedly until the string stops changing.
+ * A single pass over a strip-regex can leave a dangerous construct that
+ * only forms once an *earlier* match is removed (e.g. `<scr<script>ipt>`
+ * reforms into `<script>` after the inner tag is stripped). Looping to a
+ * fixed point closes that nested/malformed-input bypass.
+ */
+function replaceToFixedPoint(input: string, pattern: RegExp, replacement: string): string {
+  let current = input;
+  let previous: string;
+  do {
+    previous = current;
+    current = current.replace(pattern, replacement);
+  } while (current !== previous);
+  return current;
+}
+
 // ============================================================================
 // Security Types
 // ============================================================================
@@ -292,11 +309,15 @@ export class BrowserSecurityScanner {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;');
 
-    // Remove script tags
-    sanitized = sanitized.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    // Remove script tags. Matches the open and close tags individually
+    // (bounded `[^>]*`, no greedy `[\s\S]*?` span across the tag body) so
+    // there's no ambiguous backtracking, and loops to a fixed point so a
+    // malformed/nested tag like `<scr<script>ipt>` — which reforms into a
+    // clean `<script>` after a single pass — can't survive sanitization.
+    sanitized = replaceToFixedPoint(sanitized, /<\/?script\b[^>]*>/gi, '');
 
-    // Remove event handlers
-    sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+    // Remove event handlers. Looped to a fixed point for the same reason.
+    sanitized = replaceToFixedPoint(sanitized, /\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
 
     return sanitized;
   }

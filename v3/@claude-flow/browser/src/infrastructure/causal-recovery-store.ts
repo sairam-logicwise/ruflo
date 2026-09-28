@@ -23,6 +23,11 @@ import {
   type SelectorBreakKind,
 } from '../domain/causal-recovery.js';
 
+/** True if `key` would pollute the prototype chain when used as a dynamic property name. */
+function isUnsafeKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype';
+}
+
 export interface IBreakStore {
   recordBreak(event: Omit<SelectorBreakEvent, 'id' | 'timestamp'> & Partial<Pick<SelectorBreakEvent, 'id' | 'timestamp'>>): Promise<SelectorBreakEvent>;
   /** Get all break events for an origin. */
@@ -65,6 +70,10 @@ export class InMemoryBreakStore implements IBreakStore {
 
   /** Record an attempt (success or failure) — denominator for risk scoring. */
   recordAttempt(origin: string, selector: string): void {
+    // SECURITY: origin/selector come from caller-supplied strings; guard
+    // against a `__proto__`/`constructor`/`prototype` key reaching a
+    // dynamic property assignment (prototype pollution).
+    if (isUnsafeKey(origin) || isUnsafeKey(selector)) return;
     const perOrigin = this.state.attempts[origin] ?? (this.state.attempts[origin] = {});
     perOrigin[selector] = (perOrigin[selector] ?? 0) + 1;
   }
