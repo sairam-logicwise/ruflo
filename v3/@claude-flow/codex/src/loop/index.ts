@@ -60,7 +60,15 @@ export interface LoopCommandResult {
 }
 
 export function normalizeLoopName(name = 'default'): string {
-  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '');
+  const collapsed = name.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-');
+  // Trim leading/trailing '-' with a manual scan instead of /^-+|-+$/g, which
+  // is polynomial-time on adversarial input (no '^' anchor forces the engine
+  // to retry the trailing-dash run from every position). See CodeQL js/polynomial-redos.
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed[start] === '-') start++;
+  while (end > start && collapsed[end - 1] === '-') end--;
+  const normalized = collapsed.slice(start, end);
   return normalized || 'default';
 }
 

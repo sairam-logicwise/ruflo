@@ -192,7 +192,9 @@ export async function parseClaudeMd(content: string): Promise<ParsedClaudeMd> {
   };
 
   // Extract title (first H1)
-  const titleMatch = content.match(/^#\s+(.+)$/m);
+  // Single `\s` (not `\s+`) avoids the polynomial-redos overlap between `\s+`
+  // and `.+` (both match spaces/tabs); extra whitespace is removed by .trim() below.
+  const titleMatch = content.match(/^#\s(.*)$/m);
   if (titleMatch && titleMatch[1]) {
     result.title = titleMatch[1].trim();
     result.settings.projectName = result.title;
@@ -243,7 +245,9 @@ export async function parseClaudeMd(content: string): Promise<ParsedClaudeMd> {
  */
 function parseSections(content: string, lines: string[]): ParsedSection[] {
   const sections: ParsedSection[] = [];
-  const sectionRegex = /^(#{1,6})\s+(.+)$/;
+  // Single `\s` (not `\s+`) avoids the polynomial-redos overlap between `\s+`
+  // and `.+` (both match spaces/tabs); extra whitespace is removed by .trim() below.
+  const sectionRegex = /^(#{1,6})\s(.*)$/;
 
   let currentSection: ParsedSection | null = null;
   let contentLines: string[] = [];
@@ -491,40 +495,50 @@ function extractSettings(content: string, sections: ParsedSection[]): ParsedSett
 }
 
 /**
- * Extract behavioral rules from content
+ * Collect bullet ("- " / "* ") lines under the first line matching `headerTest`,
+ * stopping at the next heading (##+ or a single "# ") or end of content.
+ *
+ * Implemented as a manual line scan rather than a single regex with a lazy
+ * `[\s\S]*?` capture + alternation lookahead, which CodeQL flags as
+ * polynomial-redos on adversarial input.
  */
-function extractBehavioralRules(content: string): string[] {
+function extractBulletLines(content: string, headerTest: RegExp): string[] {
   const rules: string[] = [];
+  let inSection = false;
 
-  // Look for Behavioral Rules section
-  const behavioralMatch = content.match(/##\s*Behavioral\s*Rules[^\n]*\n([\s\S]*?)(?=\n##|\n#\s|$)/i);
-  if (behavioralMatch && behavioralMatch[1]) {
-    const ruleLines = behavioralMatch[1].split('\n');
-    for (const line of ruleLines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('- ')) {
-        rules.push(trimmed.substring(2));
-      } else if (trimmed.startsWith('* ')) {
-        rules.push(trimmed.substring(2));
+  for (const line of content.split('\n')) {
+    if (!inSection) {
+      if (headerTest.test(line)) {
+        inSection = true;
       }
+      continue;
     }
-  }
 
-  // Also look for Security Rules
-  const securityMatch = content.match(/##\s*Security\s*Rules?[^\n]*\n([\s\S]*?)(?=\n##|\n#\s|$)/i);
-  if (securityMatch && securityMatch[1]) {
-    const securityLines = securityMatch[1].split('\n');
-    for (const line of securityLines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('- ')) {
-        rules.push(trimmed.substring(2));
-      } else if (trimmed.startsWith('* ')) {
-        rules.push(trimmed.substring(2));
-      }
+    if (line.startsWith('##') || /^#\s/.test(line)) {
+      break;
+    }
+
+    const trimmed = line.trim();
+    if (trimmed.startsWith('- ')) {
+      rules.push(trimmed.substring(2));
+    } else if (trimmed.startsWith('* ')) {
+      rules.push(trimmed.substring(2));
     }
   }
 
   return rules;
+}
+
+/**
+ * Extract behavioral rules from content
+ */
+function extractBehavioralRules(content: string): string[] {
+  return [
+    // Look for Behavioral Rules section
+    ...extractBulletLines(content, /^##\s*Behavioral\s*Rules/i),
+    // Also look for Security Rules
+    ...extractBulletLines(content, /^##\s*Security\s*Rules?/i),
+  ];
 }
 
 /**

@@ -677,7 +677,9 @@ function extractSections(content: string): Array<{ level: number; title: string;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
-    const match = line.match(/^(#{1,6})\s+(.+)$/);
+    // Single `\s` (not `\s+`) avoids the polynomial-redos overlap between
+    // `\s+` and `.+` (both match spaces/tabs); extra whitespace is trimmed below.
+    const match = line.match(/^(#{1,6})\s(.*)$/);
     if (match && match[1] && match[2]) {
       sections.push({
         level: match[1].length,
@@ -855,6 +857,19 @@ function parseToml(content: string): TomlParseResult {
     }
 
     // Store in nested structure
+    // Guard against prototype pollution: `key` (and `currentSection`, used as
+    // a property name below) come from parsed TOML text and can be attacker
+    // controlled. `__proto__`/`constructor`/`prototype` would otherwise let a
+    // crafted config write onto Object.prototype (e.g. via
+    // `result.data.__proto__` resolving to the real Object.prototype when no
+    // own property shadows it yet).
+    const isDangerousKey = (k: string): boolean =>
+      k === '__proto__' || k === 'constructor' || k === 'prototype';
+
+    if (isDangerousKey(key) || (currentSection && isDangerousKey(currentSection))) {
+      continue;
+    }
+
     if (currentSection) {
       if (!result.data[currentSection]) {
         result.data[currentSection] = {};
@@ -881,6 +896,36 @@ function findFieldLine(lines: string[], field: string): number {
 }
 
 /**
+ * Find markdown links `[text](url)` in `content`.
+ *
+ * Implemented as a manual scan rather than `/\[([^\]]+)\]\(([^)]+)\)/g`,
+ * which CodeQL flags as polynomial-redos: on input with many unmatched `[`
+ * (or `]` never followed by `(`) the regex re-scans to the end of the string
+ * from every candidate start position. `indexOf` calls here only ever move
+ * forward, and the loop stops as soon as a required delimiter can't be found
+ * anywhere ahead (nothing later could match either), keeping this linear.
+ */
+function findMarkdownLinks(content: string): Array<{ url: string; index: number }> {
+  const links: Array<{ url: string; index: number }> = [];
+  let from = 0;
+  while (true) {
+    const openBracket = content.indexOf('[', from);
+    if (openBracket === -1) break;
+    const closeBracket = content.indexOf(']', openBracket + 1);
+    if (closeBracket === -1) break;
+    if (content[closeBracket + 1] === '(') {
+      const closeParen = content.indexOf(')', closeBracket + 2);
+      if (closeParen === -1) break;
+      links.push({ url: content.slice(closeBracket + 2, closeParen), index: openBracket });
+      from = closeParen + 1;
+    } else {
+      from = closeBracket + 1;
+    }
+  }
+  return links;
+}
+
+/**
  * Check for common issues in content
  */
 function checkCommonIssues(
@@ -890,12 +935,10 @@ function checkCommonIssues(
   warnings: ValidationWarning[]
 ): void {
   // Check for broken links
-  const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
-  let match;
-  while ((match = linkPattern.exec(content)) !== null) {
-    const url = match[2]!;
+  for (const link of findMarkdownLinks(content)) {
+    const url = link.url;
     if (url.startsWith('http') && !url.startsWith('https://')) {
-      const line = findLineNumber(content, match.index);
+      const line = findLineNumber(content, link.index);
       warnings.push({
         path: 'AGENTS.md',
         message: `Non-HTTPS URL found: ${url}`,
@@ -917,24 +960,55 @@ function checkCommonIssues(
   }
 
   // Check for placeholder content
-  const placeholderPatterns = [
-    /\[your[- ].*\]/i,
-    /\[insert[- ].*\]/i,
-    /\[add[- ].*\]/i,
-    /\{your[- ].*\}/i,
-    /<your[- ].*>/i,
+  if (hasPlaceholderContent(content)) {
+    warnings.push({
+      path: 'AGENTS.md',
+      message: 'Placeholder content detected',
+      suggestion: 'Replace placeholder text with actual content',
+    });
+  }
+}
+
+/**
+ * Detect unfilled placeholder markers like `[your company name]`, `{your team}`,
+ * or `<your value>`.
+ *
+ * Implemented as a manual scan rather than patterns like `/\[your[- ].*\]/i`,
+ * which CodeQL flags as polynomial-redos: on content with many opening markers
+ * and no closing delimiter, the regex re-scans to the end of the string from
+ * every candidate start position. `indexOf` here only ever moves forward, and
+ * a missing closing delimiter stops the whole scan (nothing later can match
+ * either), keeping this linear.
+ */
+function hasPlaceholderContent(content: string): boolean {
+  const lower = content.toLowerCase();
+  const markers: Array<[open: string, close: string]> = [
+    ['[your', ']'],
+    ['[insert', ']'],
+    ['[add', ']'],
+    ['{your', '}'],
+    ['<your', '>'],
   ];
 
-  for (const pattern of placeholderPatterns) {
-    if (pattern.test(content)) {
-      warnings.push({
-        path: 'AGENTS.md',
-        message: 'Placeholder content detected',
-        suggestion: 'Replace placeholder text with actual content',
-      });
-      break;
+  for (const [open, close] of markers) {
+    let from = 0;
+    while (true) {
+      const start = lower.indexOf(open, from);
+      if (start === -1) break;
+      const sepIndex = start + open.length;
+      const sep = lower[sepIndex];
+      if (sep !== '-' && sep !== ' ') {
+        from = start + 1;
+        continue;
+      }
+      if (lower.indexOf(close, sepIndex + 1) !== -1) {
+        return true;
+      }
+      break; // no closing delimiter anywhere ahead — nothing further can match
     }
   }
+
+  return false;
 }
 
 /**
@@ -992,6 +1066,35 @@ function findLineNumber(content: string, index: number): number {
 }
 
 /**
+ * Find non-overlapping `${open}...${close}` spans in `content` and return
+ * their inner text (`+` semantics: empty spans are skipped).
+ *
+ * Implemented as a manual scan rather than a regex like
+ * `/\[mcp_servers\.([^\]]+)\]/g`, which CodeQL flags as polynomial-redos:
+ * on content with many `open` occurrences and no matching `close`, the regex
+ * re-scans to the end of the string from every candidate start position.
+ * `indexOf` here only ever moves forward, and a missing `close` stops the
+ * whole scan (nothing later can match either), keeping this linear.
+ */
+function findDelimitedNames(content: string, open: string, close: string): string[] {
+  const names: string[] = [];
+  let from = 0;
+  while (true) {
+    const start = content.indexOf(open, from);
+    if (start === -1) break;
+    const innerStart = start + open.length;
+    const end = content.indexOf(close, innerStart);
+    if (end === -1) break; // no closing delimiter anywhere ahead — nothing further can match
+    const inner = content.slice(innerStart, end);
+    if (inner.length > 0) {
+      names.push(inner);
+    }
+    from = end + close.length;
+  }
+  return names;
+}
+
+/**
  * Validate MCP server configurations
  */
 function validateMcpServers(
@@ -1001,13 +1104,7 @@ function validateMcpServers(
   warnings: ValidationWarning[]
 ): void {
   // Find all MCP server sections
-  const serverRegex = /\[mcp_servers\.([^\]]+)\]/g;
-  const servers: string[] = [];
-  let match;
-
-  while ((match = serverRegex.exec(content)) !== null) {
-    servers.push(match[1]!);
-  }
+  const servers: string[] = findDelimitedNames(content, '[mcp_servers.', ']');
 
   for (const serverName of servers) {
     // Check if server has command
@@ -1047,13 +1144,7 @@ function validateProfiles(
   errors: ValidationError[],
   warnings: ValidationWarning[]
 ): void {
-  const profileRegex = /\[profiles\.([^\]]+)\]/g;
-  const profiles: string[] = [];
-  let match;
-
-  while ((match = profileRegex.exec(content)) !== null) {
-    profiles.push(match[1]!);
-  }
+  const profiles: string[] = findDelimitedNames(content, '[profiles.', ']');
 
   // Suggest common profiles if missing
   const recommendedProfiles = ['dev', 'safe', 'ci'];
