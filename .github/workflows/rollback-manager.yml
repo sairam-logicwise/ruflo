@@ -421,7 +421,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          # No cache: this job checks out an arbitrary, caller-supplied ref
+          # (rollback-commit, straight from workflow_dispatch input) — restoring
+          # or saving the npm cache here could poison the shared cache scope
+          # for a later, trusted run on the default branch (CodeQL
+          # actions/cache-poisoning/poisonable-step). This is a one-off
+          # verification job, not a hot path; the slower uncached `npm ci`
+          # is the acceptable trade.
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
