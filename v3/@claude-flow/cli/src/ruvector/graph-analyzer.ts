@@ -218,8 +218,14 @@ async function loadRuVector(): Promise<IRuVectorGraph | null> {
 function extractImports(content: string, _filePath: string): Array<{ path: string; type: GraphEdge['type'] }> {
   const imports: Array<{ path: string; type: GraphEdge['type'] }> = [];
 
-  // ES6 import statements
-  const esImportRegex = /import\s+(?:(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s*,?\s*)*\s*from\s*['"]([^'"]+)['"]/g;
+  // ES6 import statements. Only the module path (match[1]) is ever used, so
+  // the specifier clause between `import` and `from` doesn't need its own
+  // structured grammar — matching it as "anything but a quote or semicolon"
+  // is exactly equivalent for this purpose and has no repeated-alternation
+  // shape to backtrack on. The original nested `(?:(?:A|B|C)+)*` shape was a
+  // real, confirmed ReDoS (~60 non-matching chars hung the process for
+  // seconds) — CodeQL js/polynomial-redos.
+  const esImportRegex = /import\s+[^'";]*?\s*from\s*['"]([^'"]+)['"]/g;
   let match: RegExpExecArray | null;
 
   while ((match = esImportRegex.exec(content)) !== null) {
