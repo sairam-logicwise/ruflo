@@ -115,7 +115,7 @@ importers:
   '@claude-flow/cli':
     dependencies:
       '@claude-flow/cli-core':
-        specifier: 3.7.0-alpha.5
+        specifier: 3.7.0-alpha.6
         version: link:../cli-core
       '@claude-flow/codex':
         specifier: 3.0.3
@@ -127,7 +127,7 @@ importers:
         specifier: 3.0.0-alpha.10
         version: link:../mcp
       '@claude-flow/neural':
-        specifier: 3.0.0-alpha.9
+        specifier: 3.0.0-alpha.10
         version: link:../neural
       '@claude-flow/plugin-agent-federation':
         specifier: 1.0.0-alpha.18
@@ -215,7 +215,7 @@ importers:
         specifier: 2.0.0-alpha.5
         version: 2.0.0-alpha.5
       '@claude-flow/memory':
-        specifier: ^3.0.0-alpha.23
+        specifier: 3.0.0-alpha.26
         version: link:../memory
       '@metaharness/darwin':
         specifier: ~0.10.2
@@ -714,7 +714,7 @@ importers:
         version: link:../shared
       '@claude-flow/swarm':
         specifier: ^3.0.0-alpha.1
-        version: 3.0.0-alpha.8
+        version: link:../swarm
       typescript:
         specifier: ^5.3.0
         version: 5.9.3
@@ -959,10 +959,6 @@ packages:
     dependencies:
       sql.js: 1.14.1
     dev: false
-
-  /@claude-flow/swarm@3.0.0-alpha.8:
-    resolution: {integrity: sha512-yFmvL19vIHf6Cj2MkkYmHyiuUm6IQyBegxECNS6/OqtmCds9pY1uNrw2FpuKICZIIXCMvOfeE2fbimGxa9lvSA==}
-    dev: true
 
   /@cognitum-one/sdk@0.2.1(multicast-dns@7.2.5):
     resolution: {integrity: sha512-ZIYKq6Tqc7zcDQRSrxphm0Uji497Mf1bi7azn2aTM4F0k+IEdPpTmAngGVaXX/hR7DYhOQ5gkUCja0DiOJLOJw==}
