@@ -21,6 +21,9 @@ env:
   NODE_VERSION: '20'
   CACHE_VERSION: v1
 
+permissions:
+  contents: read
+
 jobs:
   # Pre-verification setup and validation
   setup-verification:

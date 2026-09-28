@@ -9,6 +9,9 @@ on:
   schedule:
     - cron: '0 6 * * *'  # Daily at 6 AM UTC
 
+permissions:
+  contents: write  # commits and pushes the updated badges back to the repo
+
 jobs:
   update-badges:
     name: 📊 Update Status Badges

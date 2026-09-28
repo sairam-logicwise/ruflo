@@ -12,6 +12,9 @@ on:
 env:
   NODE_VERSION: '20'
 
+permissions:
+  contents: read
+
 jobs:
   # Code quality and security checks
   security:

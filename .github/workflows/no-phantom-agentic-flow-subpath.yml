@@ -41,6 +41,9 @@ on:
       - '.github/workflows/no-phantom-agentic-flow-subpath.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   guard:
     runs-on: ubuntu-latest

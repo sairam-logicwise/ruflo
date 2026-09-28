@@ -29,6 +29,9 @@ on:
       - 'scripts/audit-codex-integration.mjs'
       - '.github/workflows/codex-integration-audit.yml'
 
+permissions:
+  contents: read
+
 jobs:
   audit:
     name: Codex integration audit

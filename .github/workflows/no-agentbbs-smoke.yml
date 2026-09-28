@@ -37,6 +37,9 @@ on:
       - '.github/workflows/no-agentbbs-smoke.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   smoke-without-agentbbs:
     runs-on: ubuntu-latest

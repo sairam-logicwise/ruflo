@@ -13,6 +13,9 @@ on:
       - 'plugins/ruflo-chatgpt-federation/**'
       - 'plugins/ruflo-x-gateway/src/channels.mjs'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

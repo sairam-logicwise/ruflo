@@ -50,6 +50,9 @@ env:
   NODE_VERSION: '20'
   PNPM_VERSION: '8'
 
+permissions:
+  contents: read
+
 jobs:
   invariants:
     runs-on: ubuntu-latest
