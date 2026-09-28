@@ -104,7 +104,11 @@ export class DiffClassifier {
     const files: FileDiff[] = [];
     const fileBlocks = diffContent.split(/^diff --git/m).filter(Boolean);
     for (const block of fileBlocks) {
-      const pathMatch = block.match(/a\/(.+?)\s+b\/(.+)/);
+      // `.` matches whitespace too, so a lazy `(.+?)` directly followed by
+      // `\s+` is ambiguous about which of them owns a run of spaces
+      // (polynomial ReDoS on a header with no "b/"). Bound the separator to
+      // a small width instead of leaving it unbounded.
+      const pathMatch = block.match(/a\/(.+?)[ \t]{1,4}b\/(.+)/);
       if (!pathMatch) continue;
       const path = pathMatch[2];
       const hunks = this.parseHunks(block);
@@ -145,7 +149,13 @@ export class DiffClassifier {
 
   private parseHunks(block: string): DiffHunk[] {
     const hunks: DiffHunk[] = [];
-    const hunkMatches = block.matchAll(/@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@([^\n]*)\n([\s\S]*?)(?=@@|$)/g);
+    // `(\d+),?(\d*)` is ambiguous when the comma is absent: a run of digits
+    // can split between `\d+` and `\d*` in many ways (polynomial ReDoS on a
+    // malformed/long hunk header). Making the comma mandatory for the
+    // second number removes the ambiguous split point; `match[2]`/`match[4]`
+    // become `undefined` instead of `''` when absent, which the `|| '1'`
+    // fallback below already treats the same way.
+    const hunkMatches = block.matchAll(/@@ -(\d+)(?:,(\d*))? \+(\d+)(?:,(\d*))? @@([^\n]*)\n([\s\S]*?)(?=@@|$)/g);
     for (const match of hunkMatches) {
       const oldStart = parseInt(match[1], 10);
       const oldLines = parseInt(match[2] || '1', 10);

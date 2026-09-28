@@ -204,9 +204,16 @@ function getNestedValue(obj: Record<string, unknown>, key: string): unknown {
   return current;
 }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Set a nested value by dot-separated key */
 function setNestedValue(obj: Record<string, unknown>, key: string, value: unknown): void {
   const parts = key.split('.');
+  for (const part of parts) {
+    if (DANGEROUS_KEYS.has(part)) {
+      throw new Error(`Dangerous key segment rejected: ${part}`);
+    }
+  }
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];

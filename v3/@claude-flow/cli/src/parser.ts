@@ -372,7 +372,12 @@ export class CommandParser {
   private isFlagValue(arg: string): boolean {
     if (!arg.startsWith('-')) return true;
     // Negative number: '-' followed by a parseable numeric literal.
-    return /^-\d*\.?\d+(?:[eE][+-]?\d+)?$/.test(arg);
+    // `\d*\.?\d+` is ambiguous (a run of digits can split between the `\d*`
+    // and `\d+` in many ways around the optional dot), which is a
+    // polynomial-time ReDoS on a long non-matching digit run. The
+    // alternation below matches the same set of numeric literals with no
+    // ambiguous split point.
+    return /^-(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(arg);
   }
 
   /** True for the literal tokens `true`/`false` (case-insensitive). Used so a

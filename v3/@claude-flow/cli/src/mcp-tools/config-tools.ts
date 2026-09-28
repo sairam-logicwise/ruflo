@@ -117,7 +117,13 @@ function setNestedValue(obj: Record<string, unknown>, key: string, value: unknow
     }
     current = current[part] as Record<string, unknown>;
   }
-  current[parts[parts.length - 1]] = value;
+  // Explicit guard right at the sink, in addition to the upfront scan above:
+  // makes the write provably safe regardless of how `parts` was derived.
+  const finalKey = parts[parts.length - 1];
+  if (DANGEROUS_KEYS.has(finalKey)) {
+    throw new Error(`Dangerous key segment rejected: ${finalKey}`);
+  }
+  current[finalKey] = value;
 }
 
 export const configTools: MCPTool[] = [
