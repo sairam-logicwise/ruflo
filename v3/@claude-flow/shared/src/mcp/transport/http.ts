@@ -208,10 +208,10 @@ export class HttpTransport extends EventEmitter implements ITransport {
    * Setup Express middleware
    */
   private setupMiddleware(): void {
-    // Security headers
-    this.app.use(helmet({
-      contentSecurityPolicy: false, // Allow for flexibility
-    }));
+    // Security headers — helmet's default CSP applies (no legitimate reason
+    // to disable it on a JSON-RPC API that never serves attacker-influenced
+    // HTML; CodeQL js/insecure-helmet-configuration).
+    this.app.use(helmet());
 
     // CORS - Secure defaults (no wildcard in production)
     if (this.config.corsEnabled !== false) {

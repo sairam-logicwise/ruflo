@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
 import { IsotonicCalibrator } from '../v3/@claude-flow/cli/dist/src/ruvector/router-calibrator.js';
 // iter 35 — single source of truth for prices.
-import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
+import { priceKnownCandidates } from './train-price-guard.mjs';
 
 const ARGS = (() => {
   const a = {
@@ -41,8 +41,8 @@ if (!existsSync(ARGS.corpus)) {
 }
 
 const rows = JSON.parse(readFileSync(ARGS.corpus, 'utf8'));
-const candidates = Object.keys(rows[0].scores);
-const prices = Object.fromEntries(candidates.map(m => [m, blendedPrice(m)]));
+const prices = priceKnownCandidates(rows, 'calibrate');
+const candidates = Object.keys(prices); // post-filter — must match what's left in rows' scores
 
 console.log(`[calibrate] corpus: ${ARGS.corpus} (${rows.length} rows, ${candidates.length} candidates)`);
 

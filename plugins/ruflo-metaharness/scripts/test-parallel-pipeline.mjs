@@ -182,6 +182,45 @@ async function main() {
   const strictBad = spawnSync('node', [analyzer, '--input', badPath, '--strict'], { encoding: 'utf-8', timeout: 30_000 });
   assert(strictBad.status === 1, '--strict on NON-promotable fixture exits 1 (got ' + strictBad.status + ')');
 
+  // ──────────────────────────────────────────────────────────────────
+  // PHASE 5 — I9 (review-2026-09-22.md): an underestimated disagreement-
+  // row predictedCostUsd must not manufacture a false cost "improvement".
+  // ──────────────────────────────────────────────────────────────────
+  console.log('\nPhase 5 — cost floor cannot manufacture a false pass (I9)');
+
+  const floorPath = join(fixture, 'cost-floor.jsonl');
+  const floorRows = [];
+  const banditRealUsd = 0.002;
+  for (let i = 0; i < 30; i++) {
+    floorRows.push({
+      ts: new Date().toISOString(),
+      task: { id: `floor-${i}` },
+      // Every row disagrees, and SER's predictedCostUsd is deliberately
+      // BELOW bandit's real cost — simulating outputTokens:0 underpricing
+      // an actually-pricier model that never got to execute.
+      bandit: { pick: 'cheap-model', predictedQuality: 0.8, predictedCostUsd: banditRealUsd },
+      ser: { pick: 'pricier-model', predictedQuality: 0.85, predictedCostUsd: banditRealUsd / 4 },
+      outcome: { actualModel: 'cheap-model', actualQuality: 0.8, actualUsd: banditRealUsd, actualLatencyMs: 500 },
+    });
+  }
+  writeFileSync(floorPath, floorRows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+  const floorRun = spawnSync('node', [analyzer, '--input', floorPath, '--format', 'json'], { encoding: 'utf-8', timeout: 30_000 });
+  let floorPayload;
+  try {
+    floorPayload = JSON.parse(floorRun.stdout);
+  } catch (e) {
+    console.error('  stdout:', floorRun.stdout.slice(0, 400));
+    assert(false, `I9 fixture analyzer output parseable (${e.message})`);
+    floorPayload = {};
+  }
+
+  assert(floorPayload.disagreement?.costEstimateClamped === 30, `all 30 underestimated rows clamped (got ${floorPayload.disagreement?.costEstimateClamped})`);
+  // Clamped: ser's mean cost is pulled up to bandit's real cost, not left
+  // at the underestimated floor — so the delta is 0%, never a fabricated
+  // negative (cheaper-than-verified) number.
+  assert(floorPayload.criteria?.usdIncreasePct === 0, `clamped usdIncreasePct === 0 (got ${floorPayload.criteria?.usdIncreasePct}) — an unclamped floor here would show -75%, a false cost improvement never actually verified`);
+
   // Cleanup
   if (process.env.TEST_PIPELINE_KEEP_FIXTURE !== '1') {
     rmSync(fixture, { recursive: true, force: true });

@@ -1,0 +1,2254 @@
+# Implementation Plan: Tool-Neutral Agentic SDLC
+
+**Base:** our fork of ruflo, pinned at v3.42.3 (`6f0ed7112`)
+**Companion doc:** the Agentic SDLC Build Plan (architecture and rationale)
+**Status:** decisions D1-D5 approved 2026-09-18, nothing blocked — no code written yet
+
+---
+
+## Overview
+
+We are building an agentic software development lifecycle that any AI coding tool can drive — Claude Code, Cursor, Codex, or any MCP client. The workflow turns a requirement into a merged change, quotes what it will cost in tokens before building, documents every requirement/decision/task as a validated record, refuses to let mandatory steps be skipped, runs unattended to a quality bar, and writes and runs its own tests.
+
+Eight requirements define done. They are not eight separate features: seven of them are projections over one spine, which is the typed record store.
+
+---
+
+## Architecture decisions
+
+### AD-1: The record is the gate, not the prompt
+
+**Decision:** Phase transitions are gated on validated record state. An agent cannot start implementation because the engine will not give it implementation context without an accepted spec record.
+
+**Why this matters:** An instruction in `CLAUDE.md`, `.cursorrules` or `AGENTS.md` is advisory in every tool. We audited nine spec-workflow projects; every claimed gate is a string in a prompt file that an agent can ignore, and the strongest of them only checks that a file exists, not that it was accepted. Prompt-level enforcement cannot satisfy requirement 6. Making the input unavailable can.
+
+### AD-2: Enforcement lives in the MCP client path and CI, nowhere else
+
+**Decision:** The phase gate goes in `authorizeMcpTool` (`v3/@claude-flow/cli/src/services/policy-runtime.ts:376`), called from `callMCPTool` (`v3/@claude-flow/cli/src/mcp-client.ts:265`). It is mirrored in git hooks and CI.
+
+**Why this matters:** The obvious seam — the server-side policy check at `v3/@claude-flow/cli/src/mcp-server.ts:653` — is stdio-only, so switching transport bypasses it, and it receives only a tool name and a session id. The client-side call sits on every path including HTTP and the CLI, and already receives tool input and context. Only two surfaces block identically across tools: an MCP error, and CI.
+
+**Known limit, accepted:** an MCP gate cannot see a tool's built-in file editor. We are not preventing edits. We are preventing unspecified work from becoming a commit, and unverified commits from becoming merges.
+
+### AD-3: Adopt Graphify and a DocOps fork; build the rest
+
+**Decision:** Graphify (Apache-2.0 + MIT) for code mapping, used as-is over MCP. DocOps (MIT) forked into our repo for the record substrate. Everything else we build.
+
+**Why this matters:** Graphify has already indexed this repo — 3,667 files, 57,751 nodes, 81,511 edges, built from our current commit, zero token cost. Building our own indexer costs 6-12 weeks to parity and never stops costing. DocOps is the only project with genuinely typed records, generated JSON Schema, and a machine-checked rule that every task cites a decision or context. That alignment contract is exactly our spine, already written. We fork rather than depend because it is a one-person project, one star, untouched since May.
+
+### AD-4: Failure is never a terminal state
+
+**Decision:** A failed task moves to `Blocked`, not `Done`.
+
+**Why this matters:** The inherited autopilot puts `'failed'` in `TERMINAL_STATUSES` (`autopilot-state.ts:33`), which silently drops work. Anything that treats failure as completion will quietly lose tasks and report success.
+
+### AD-5: Estimator v0 is nearest-neighbour, not regression
+
+**Decision:** Quote by finding similar past tasks and reporting the range they actually cost. Regression comes later, at milestone 8.
+
+**Why this matters:** Quoting is the team's first priority, and a regression needs data we will not have on day one. Nearest-neighbour works with twenty examples and improves smoothly. Vector search over records already exists in the fork, so this is a small build rather than an ML project.
+
+### AD-6: We never ship a point estimate
+
+**Decision:** Every quote is a range with a confidence level, and variance against actuals is published from the first delivered task.
+
+**Why this matters:** Agentic work has a long tail — a task needing three retries costs roughly four times one that lands first try. A confident wrong number destroys trust in the whole programme, and quoting is the first thing the business will see.
+
+---
+
+## Dependency graph
+
+```
+Graphify adopted (T1)          DocOps forked (T2)
+        │                              │
+        │                              ▼
+        │                    Record schemas (T3)
+        │                              │
+        │                    ┌─────────┼─────────┐
+        │                    ▼         ▼         ▼
+        │              Record CLI  Citation   Decomposition
+        │                 (T4)     contract      (T6)
+        │                    │       (T5)         │
+        │                    └─────────┼──────────┘
+        │                              │
+        ▼                              ▼
+  Backfill (T22-T24)          Corpus + calibration (T7, T8)
+                                       │
+                                       ▼
+                              Feature extractor (T9)
+                                       │
+                                       ▼
+                              Estimator v0 (T10)
+                                       │
+                                       ▼
+                          quote command + MCP tool (T11)  ◄── FIRST DEMO
+                                       │
+                                       ▼
+                              Actuals + variance (T12, T13)
+                                       │
+                                       ▼
+                        State machine (T14) → Gate (T15) → CI (T16)
+                                       │
+                                       ▼
+                     Test-gated done (T17, T18, T19)
+                                       │
+                          ┌────────────┼────────────┐
+                          ▼            ▼            ▼
+                   Plain English  Adapters     Autonomy
+                      (T20)      (T21)        (T25, T26)
+```
+
+Build order follows this bottom-up. The one hard constraint is that records precede everything, because a task record is the unit we estimate over and the unit we gate on.
+
+---
+
+## Phase 0: Adopt
+
+### Task 1: Wire Graphify in as an MCP server with CI refresh
+
+**Description:** Register Graphify's MCP server in our `.mcp.json` template so every tool target sees it. Add a CI job that refreshes the graph on merge and fails if the graph's recorded commit has drifted from `HEAD`.
+
+**Why this matters:** The graph is our only real map of the codebase — the fork has no symbol table, no dependency graph and no index of its own. Every backfill and impact-analysis step depends on it. A stale graph is worse than no graph, because agents will confidently reason about code that has moved; the report itself tells you to compare its recorded commit against `git rev-parse HEAD`, so we automate that rather than trusting memory.
+
+**Acceptance criteria:**
+- [x] Graphify MCP server appears in the generated `.mcp.json` and answers a query
+- [x] CI job refreshes the graph and fails the build when the recorded commit is behind `HEAD`
+- [x] Refresh uses the incremental path and reports zero token cost
+
+**Verification:**
+- [ ] Manual: query the graph from Claude Code and from one non-Claude tool
+- [ ] CI: push a commit touching a source file, confirm the refresh job runs and passes
+- [x] Check `graphify-out/GRAPH_REPORT.md` shows the new commit
+
+**Done 2026-09-21, with two verification steps needing a real CI run/second
+tool to close out.** Registered `graphify` in `MCPConfig`
+(`src/init/types.ts`, on by default in `DEFAULT_INIT_OPTIONS`/
+`FULL_INIT_OPTIONS`) and in `mcp-generator.ts` — invoked as
+`python3 -m graphify.serve graphify-out/graph.json`, not via npx like the
+Node-based servers, since it's a Python package (`pip install graphifyy`).
+Marked `optional: true` so a clone without Python graphify installed doesn't
+break the other registered servers. 5 new tests + the existing `#2206`
+regression suite (fixed to include the new required field) all pass.
+
+**Real discovery that changed the CI design from the plan's original
+framing:** `graphify-out/` is `.gitignore`'d — nothing is committed, so a
+fresh CI runner starts with no graph, not an existing one to "refresh". And
+semantic (non-code) extraction is normally done by Claude Code dispatching
+Agent subagents — a headless runner can't do that without a
+GEMINI_API_KEY/GOOGLE_API_KEY secret, which isn't configured. Raised this to
+Sairam; decision: **CI does the free AST-only refresh always and never
+blocks merges on the semantic gap** (a human runs `/graphify --update`
+interactively when convenient). `.github/workflows/graph-refresh.yml`
+implements exactly that: restores a rolling Actions cache of `graphify-out/`
+(works cold on a cache miss too — `graphify update` builds an AST-only
+baseline from nothing), runs `python3 -m graphify update .` (verified
+locally: no network call on this path, real run against this repo did
+0 nodes' worth of LLM work and finished in seconds), runs the tool's own
+cron-safe `check-update` (always exits 0, only ever posts a job-summary
+warning), asserts `GRAPH_REPORT.md`'s recorded commit equals `HEAD` after a
+successful update (verified both the pass case and, by deliberately
+corrupting the report and restoring it, the fail case), then saves the
+cache unconditionally. The two open verification checkboxes need a real
+GitHub Actions run and a second AI tool (Cursor/Codex) to close out — both
+require infrastructure (CI execution, another tool's MCP client) outside
+what this session can drive directly.
+
+**Dependencies:** None
+**Files likely touched:** `v3/@claude-flow/cli/src/init/` (mcp config template), `.github/workflows/graph-refresh.yml`
+**Estimated scope:** S
+
+---
+
+### Task 2: Fork DocOps into the repo
+
+**Description:** Vendor DocOps under a path we own, pin it, strip what we do not need, and get its validator running on a throwaway example. Do not add it as an npm dependency.
+
+**Why this matters:** DocOps gives us three things we would otherwise spend a week writing: typed record definitions, generated JSON Schema per type, and a validator enforcing that every task cites a decision or context document. That citation rule is the mechanism that stops agent work drifting from intent, and it is checkable by a script rather than a reviewer. We fork rather than depend because the upstream is one person's project, one star, and has not moved since May — an unmaintained dependency in the foundation layer is a liability.
+
+**Acceptance criteria:**
+- [x] DocOps source vendored, licence and attribution preserved (MIT)
+- [ ] `validate` runs and rejects a task that cites nothing — **scope moved to T4**, see note below
+- [x] No runtime npm dependency on the upstream package
+
+**Verification:**
+- [ ] Create a valid record set, validate passes — deferred to T4 (no validator exists to run yet)
+- [ ] Remove the citation from a task, validate fails with a clear message — deferred to T4
+- [x] `npm run build` succeeds — no new build-graph member added (see note), so no new breakage; the package already had 472 pre-existing tsc errors unrelated to this (see T12's note)
+
+**Done 2026-09-21, with one acceptance criterion's scope corrected.**
+**Real discovery: DocOps is a Go CLI tool** (`go.mod`, `cmd/`, `internal/`
+layout, 274 files) — not a JS/TS library. The plan's framing ("new
+`v3/@claude-flow/docops/` package", "no runtime npm dependency on the
+upstream package") assumed a JS/TS vendoring shape that doesn't exist here.
+Raised this to Sairam; decision: **vendor a reference-only copy, no Go
+build, nothing runs at runtime.** T3 reads the real design and reimplements
+the schemas/validator natively in TypeScript.
+
+Vendored under `v3/@claude-flow/docops/` (no `package.json` — not a pnpm
+workspace member, confirmed `pnpm-workspace.yaml`'s `@claude-flow/*` glob
+only registers directories with one, so this is inert to the build):
+- `LICENSE` (verbatim MIT) + `ATTRIBUTION.md` (pinned commit, full
+  included/excluded file list and why, and a correction to HANDOVER.md §7's
+  "untouched since May" claim — the upstream actually has an active `dev`
+  branch and unreleased `0.7.0` work past the last `v0.6.0` tag; doesn't
+  change the fork-not-depend call, but the stated reason was wrong)
+- `vendor/schema/{types,validate,jsonschema}.go` — the CTX/ADR/TP struct
+  defs, the citation-rule validation (confirmed by reading the code: `must
+  cite at least one ADR or CTX (ADR-0004 alignment rule)`), and the
+  JSON-Schema emitter
+- `vendor/validator/validator.go` — cross-document edge/supersede checks
+- `vendor/docs-examples/` — the three upstream ADRs that motivated the
+  schema (0002 bare-minimum frontmatter, 0003 filename-as-ID, 0004 the
+  citation rule itself) plus one real `CTX-001` example
+
+Stripped: all CLI plumbing (`init`/`serve`/`audit`/`amender`/`upgrader`/
+release tooling), the HTML viewer, all `_test.go` files, and DocOps's own
+self-hosted docs beyond the four example files — none of it is design
+reference for schema/validator work.
+
+**What this means for T4:** "`validate` runs and rejects a task that cites
+nothing" is really T4's acceptance criterion now (`ruflo req/task/validate`
+is a TypeScript CLI, not a wrapped Go binary) — flagging so whoever picks up
+T3/T4 doesn't assume it's already satisfied.
+
+**Dependencies:** None
+**Files likely touched:** new `v3/@claude-flow/docops/` package, root workspace config
+**Estimated scope:** M
+
+---
+
+### Checkpoint: Phase 0
+- [ ] `npm test` passes, `npm run build` succeeds
+- [ ] Graph queryable from two different AI tools
+- [ ] Record validation demonstrably rejects an uncited task
+- [ ] **Human review before proceeding**
+
+---
+
+## Phase 1: A record exists and validates (vertical slice A)
+
+### Task 3: Define the three record schemas
+
+**Description:** Adapt the forked schemas to our needs: requirement, decision, task. Markdown body plus typed front matter. Every record carries a stable id, status, created and updated dates, citations, a content hash, and a provenance field. Tasks additionally carry estimate, actuals, and done criteria.
+
+**Why this matters:** This is the spine. Seven of the eight requirements are projections over it — gating reads status, the estimator reads task fields, QA writes the done field, the plain-English validator reads the human-facing fields. Getting the field set wrong here forces rework in every later phase. The provenance field specifically prevents the failure where a requirement the AI guessed from old code becomes indistinguishable from one a human wrote; without it the substrate becomes untrustworthy within a month.
+
+**Acceptance criteria:**
+- [x] Three schemas defined, each generating a JSON Schema for editor validation
+- [x] Citation contract enforced: a task must cite at least one requirement or decision
+- [x] Provenance field distinguishes human-authored from agent-inferred
+- [x] Records diff and merge sensibly as files in git (plain markdown + YAML frontmatter, one file per record — see below)
+
+**Verification:**
+- [x] Unit tests cover: valid record, missing citation, unknown field, bad status
+- [x] `npm test -- --grep "record schema"` passes — literal flag doesn't exist in this repo's vitest 4 (`--grep` is a Mocha/Jest-ism); the equivalent `vitest run --testNamePattern "record schema"` isolates and passes all 18 matching tests
+- [x] Manual: open a record in an editor, confirm schema autocomplete works — didn't open an actual editor (no interactive session here), but validated the generated JSON Schema files for real with `ajv`: a well-formed task passes, one with `extraField` correctly fails on `additionalProperties`, confirming the schema an editor would load is faithful, not just "didn't throw during generation"
+
+**Done 2026-09-21.** Built the real package this time (T2 left `v3/@claude-flow/docops/`
+with no `package.json`, deliberately — see T2's note). New:
+- `src/schemas/base.ts` — shared fields (`id`, `title`, `createdAt`/`updatedAt`,
+  `citations`, `contentHash`, `provenance`) and the `RecordIdSchema` id pattern.
+  Renamed DocOps's "Context" to "Requirement" (REQ-) to match the plan's own
+  language; added a `status` field DocOps's Context lacks, per Task 3's own
+  description.
+- `src/schemas/{requirement,decision,task}.ts` — Zod schemas, `.strict()` (unknown
+  keys rejected). `TaskSchema` overrides the base's optional `citations` with
+  the actual citation contract: non-empty, and not satisfiable by other
+  tasks alone (`.refine` checking for a REQ- or DEC- id) — same rule as
+  upstream's ADR-0004, ported as designed rather than copied.
+  `estimate`/`actuals`/`doneCriteria` are new fields DocOps has no
+  equivalent for, shaped to match T10/T13/T18's stated contracts
+  respectively (each still a placeholder those tasks will formalize).
+- `src/content-hash.ts` — sha256 of the record body (not the frontmatter,
+  which would make the hash depend on itself).
+- `src/frontmatter.ts` — splits YAML frontmatter from the markdown body and
+  resolves which schema applies from the record's own `id` prefix.
+  **Not using `gray-matter`** despite adding it initially: it hard-requires
+  js-yaml v3's `safeLoad` at module-load time, and crashes on import under
+  this workspace's `pnpm.overrides` forcing `js-yaml >=4.3.0` (v4 dropped
+  `safeLoad`) — no option passed to it can work around a crash at require()
+  time. Hand-rolled the split against `js-yaml` directly instead; it's a
+  few lines and removes the broken dependency entirely.
+- `scripts/generate-json-schemas.ts` + checked-in `schemas/*.schema.json` —
+  via `zod-to-json-schema`. The `.refine()` business rules (citation count,
+  estimate range) don't appear in the generated JSON Schema — expected;
+  JSON Schema autocomplete is for field shapes, the real rule enforcement
+  lives in the Zod schemas T4's CLI will call.
+- 32 tests across 4 files, `npm run build` succeeds for this package cleanly
+  (no pre-existing breakage here, unlike `@claude-flow/cli`'s 472 tsc errors).
+
+**"Records diff and merge sensibly as files in git"**: satisfied by design,
+not by a committed example — records are one markdown file per record with
+YAML frontmatter, a line-based text format, not a JSON blob. T4 (Record CLI)
+decides where those files actually live in the repo; adding a real example
+there now would presuppose that.
+
+**Dependencies:** T2
+**Files likely touched:** `v3/@claude-flow/docops/src/schemas/`, `v3/@claude-flow/docops/src/types.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Task 4: Record CLI — create, show, list, validate
+
+**Description:** Add a top-level command for record operations. Registration is a new file exporting a `Command` object plus one line in the loader map at `v3/@claude-flow/cli/src/commands/index.ts:25-106`. Use `v3/@claude-flow/cli/src/commands/advisor.ts` as the shape template.
+
+**Why this matters:** The CLI is the universal fallback. Any tool that can run a shell command can drive the workflow even with no MCP support, which means a tool we have never tested — or a developer working by hand — can still participate. Every MCP tool we expose later should have a CLI equivalent, and this establishes that pattern.
+
+**Acceptance criteria:**
+- [x] `ruflo req new|show|list` and `ruflo task new|show|list` work — nested as
+  `ruflo record req|task new|show|list` (see naming-collision note below);
+  also added `ruflo record decision new|show|list` for the third kind T3 built
+- [x] Creating a task without a citation is refused with a message naming what is missing
+- [x] `ruflo validate` checks the whole record set — as `ruflo record validate`
+
+**Verification:**
+- [x] Tests for each subcommand, happy path and refusal path
+- [x] Manual: create a requirement, then a task citing it, then list both —
+  ran for real against the compiled CLI binary (`node bin/cli.js record ...`),
+  not just unit tests; output included below
+- [x] `npm run build` succeeds — for `@claude-flow/cli` specifically: no,
+  same 472 pre-existing errors as T12 (unrelated `@claude-flow/cli-core`
+  resolution); tsc still emits working output for every file that has no
+  error (including this task's own), which is what the manual CLI run below
+  actually exercises. Building `@claude-flow/cli-core` and `@claude-flow/docops`
+  themselves (both actually depended on) each succeed cleanly with 0 errors.
+
+**Done 2026-09-21.** Real naming collision found before writing any code:
+the plan's literal "`ruflo task new`" collides with the EXISTING `ruflo task`
+command (swarm/agent runtime task orchestration — create/list/status/cancel,
+agent assignment), a completely different concept from a planning-record
+Task. Raised this to Sairam; decision: nest everything under `ruflo record`
+(`req`/`decision`/`task`/`validate`) rather than as separate top-level
+commands — no collision, one discoverable namespace, matches the plan's own
+file list (one `records.ts`, not three command files).
+
+New: `v3/@claude-flow/cli/src/commands/records.ts`, registered in
+`commands/index.ts`'s lazy-load `commandLoaders` map (same pattern as
+`advisor`/`gaia-bench`). Depends on `@claude-flow/docops` as a real pnpm
+workspace dependency. Records live at `docs/{requirements,decisions,tasks}/`,
+one markdown file per record, filename `<ID>-<slug>.md`; ids auto-increment
+by scanning the directory. The citation contract is enforced twice:
+`task new` refuses up front (before writing anything) if `--citations` is
+empty, with a message naming the actual rule — and separately, the
+underlying `TaskSchema.safeParse` still catches the "cites only other
+tasks" case, whose message is exactly what gets surfaced. Deliberately did
+NOT mark `--citations` `required: true` on the CLI option — that triggers
+the parser's own generic "Required option missing" refusal *before* this
+command's action runs, pre-empting the actual citation-contract message;
+caught this by actually running the refusal path through the real binary,
+not just the unit test (the unit test calls the action directly, bypassing
+the parser's option-validation layer entirely, so it couldn't have caught
+this).
+
+11 new tests (happy path + refusal path per plan's own verification
+wording) plus 2 new round-trip tests added to `@claude-flow/docops` for the
+serializer T4 needed that T3 hadn't built (parse-only was T3's scope).
+Full manual walkthrough via the actual compiled CLI binary
+(`node v3/@claude-flow/cli/bin/cli.js`), not simulated:
+
+```
+$ record req new --title "Quote a feature before building it"
+[OK] Created REQ-001: .../docs/requirements/REQ-001-quote-a-feature-before-building-it.md
+
+$ record task new --title "Fix pricing bugs" --citations REQ-001 --priority p1
+[OK] Created TASK-001: .../docs/tasks/TASK-001-fix-pricing-bugs.md
+
+$ record req list                       $ record task list
++---------+--------+-------------------+   +----------+---------+------------------+
+| ID      | Status | Title             |   | ID       | Status  | Title            |
++---------+--------+-------------------+   +----------+---------+------------------+
+| REQ-001 | draft  | Quote a feature...|   | TASK-001 | backlog | Fix pricing bugs |
++---------+--------+-------------------+   +----------+---------+------------------+
+
+$ record validate
+[OK] All 2 record(s) valid.
+
+$ record task new --title "Orphan task"     # no --citations
+[ERROR] Refusing to create a task with no citations
+  A task must cite at least one requirement or decision. Pass --citations REQ-001[,DEC-002,...]
+```
+
+Also ran a broad regression check: full `@claude-flow/cli` test suite before
+vs. after this task's changes (git stash comparison, same technique as
+T12). Before: 62 failed files / 169 failed tests. After: 60 failed files /
+161 failed tests — my changes reduce failures (building `cli-core`'s dist
+as a side effect of verifying this task fixed some pre-existing breakage);
+the remaining ~60 failures are pre-existing native-binary issues (sharp,
+onnxruntime, ruvllm-wasm) unrelated to this task, present on a clean tree.
+
+**Dependencies:** T3
+**Files likely touched:** `v3/@claude-flow/cli/src/commands/records.ts`, `v3/@claude-flow/cli/src/commands/index.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Task 5: Citation contract as a git pre-commit hook
+
+**Description:** A pre-commit hook that validates every changed record against its schema and checks the citation contract. A pre-push hook placeholder that will later run tests.
+
+**Why this matters:** This is tier 2 of three enforcement tiers, and it is the first one that works regardless of which tool produced the change — including a human typing by hand. It gives fast local feedback so a developer learns the rule in seconds rather than at CI time. It is bypassable with `--no-verify`, which is why CI repeats the check later; treat this tier as feedback, not as the contract.
+
+**Acceptance criteria:**
+- [x] Committing an invalid record fails with a readable message
+- [x] Committing a valid record set succeeds
+- [x] Hook only inspects changed records, so commit time stays under a second
+
+**Verification:**
+- [x] Manual: stage a broken record, attempt commit, confirm refusal
+- [x] Manual: confirm a normal code-only commit is unaffected
+- [x] Time a commit on a large change set
+
+**Done 2026-09-21.** `scripts/hooks/pre-commit` (git-invocable, extensionless —
+git hooks live in `.git/hooks/` at the **repo root**, a different tree from
+the `v3/` pnpm workspace where T3/T4's actual validation logic lives; the
+hook loads `v3/@claude-flow/docops/dist/index.js` directly across that
+boundary). Checks only staged files matching `docs/{requirements,decisions,
+tasks}/*.md`, reads their STAGED blob content via `git show :<path>` (not
+the working-tree file — those can differ if edited again after `git add`),
+and validates via `@claude-flow/docops`. `scripts/hooks/pre-push` is the
+placeholder the description calls for — genuinely empty; T19/T20 (test-gated
+done) will fill it in. Split the decision logic into a pure
+`scripts/hooks/pre-commit-lib.mjs` (8 unit tests,
+`scripts/__tests__/pre-commit-hook.test.mjs`, matching this repo's own
+existing convention of testing a script's `.mjs` sibling in isolation) from
+the I/O wiring (git subprocess calls, loading docops, `process.exit`),
+since the git-hook file itself has no extension and can't be cleanly
+imported by a test.
+
+Installed for real via `scripts/install-git-hooks.mjs`, wired to the root
+`package.json`'s new `prepare` script — verified end-to-end: running
+`npm install` at the repo root actually re-installed the hooks
+automatically as a side effect, confirmed by its own log output.
+`--no-verify` bypass is intentional per the plan's own tier reasoning; a
+soft-fail (allow + warn) also covers the case where `docops` isn't built
+yet, so a fresh clone's first commit isn't blocked by an unrelated setup
+gap.
+
+All three manual verifications actually run against the real installed
+hook (not simulated): staged an invalid record (bad `status` enum) →
+blocked, exit 1, message named the exact field and rule; staged a valid
+record → exit 0; staged a non-record file only → exit 0 in 75ms (never
+touches docops — confirms the "changed records only" fast path); staged 20
+record files → 687ms, still comfortably under a second. Every test file was
+created, staged, checked, then unstaged and deleted — the repo's actual
+`docs/` tree is untouched.
+
+**Found while doing this, worth flagging separately from T5 itself:**
+`plugins/ruflo-adr/` already exists in this repo — a Claude Code
+agent/skill plugin (not a `ruflo` CLI command) that manages ADR lifecycle
+via AgentDB indexing at `docs/adr/` (grep/blame code-linking, no formal
+schema or citation contract). Neither HANDOVER.md nor plan.md mentioned it —
+a fourth instance this session of the plan being written without fully
+surveying the existing codebase (after: DocOps being Go not JS, `ruflo
+task` colliding, and T1's graphify-out being gitignored). No actual
+conflict for T3–T5's work (different directory — `docs/adr/` vs `docs/
+decisions/` — and `docs/adr/` doesn't exist on disk, so the plugin has
+apparently never been run here), but two competing ideas of "where ADRs
+live" in one repo is worth resolving deliberately rather than by accident.
+Flagging for whoever plans Phase 8 (backfill) or does a later architecture
+pass — not blocking anything now.
+
+**Dependencies:** T3, T4
+**Files likely touched:** `.husky/` or `scripts/hooks/`, `package.json`
+**Estimated scope:** S
+
+---
+
+### Checkpoint: Phase 1
+- [ ] A requirement and a task can be created, linked, listed and validated
+- [ ] Invalid records are refused at CLI and at commit
+- [ ] All tests pass, build clean
+- [ ] **Human review before proceeding**
+
+---
+
+## Phase 2: Quote a feature (vertical slice B) — the first demo
+
+### Task 6: Requirement decomposition agent
+
+**Description:** An agent that takes a requirement record and proposes task records, each citing the requirement. Consumes the Graphify graph to ground itself in which files and modules exist.
+
+**Why this matters:** A quote is a rollup over task records, so nothing can be estimated until a requirement has been decomposed. This is also the step that makes the quote explainable: when a stakeholder asks why a feature costs what it costs, the answer is the task list, not an opaque number. Grounding it in the real code graph is what stops it inventing modules that do not exist.
+
+**Acceptance criteria:**
+- [x] Given a requirement, produces 3-15 task records that validate
+- [x] Each task cites the source requirement
+- [x] Tasks reference real files or modules from the graph
+- [x] Output is reviewable and editable before it is committed
+
+**Verification:**
+- [x] Run against three requirements of differing size, inspect output quality manually — done 2026-09-23, via the same session-as-LLM substitute T8 established (see below)
+- [x] All produced records pass `ruflo validate` — verified via the real compiled CLI: created a real requirement, decomposed it via `--from-file`, `--yes`, then ran `ruflo record validate` — all records (requirement + tasks) pass
+- [x] Confirm referenced paths exist in the repo — verified via the real compiled CLI with a real graph fixture: a proposal citing one real file (`src/pricing.ts`, present in the graph) and one hallucinated file (`src/totally-made-up-file.ts`, not in the graph) produced a task record containing only the real path
+
+**Done 2026-09-22; real-LLM quality pass completed 2026-09-23 (see below).** New CLI subcommand
+`ruflo record req decompose <id>` in `src/commands/decompose.ts`. Reuses
+`callAnthropicMessages` from `mcp-tools/agent-execute-core.ts` (the same
+primitive `agent_execute` uses) rather than the heavier swarm agent-store
+machinery — a one-shot call needs no persistent agent. Grounding reuses
+T9's `groundInGraph()` (exported from `estimator/features.ts` for this).
+Because a real call costs real money, this is **dry-run by default**
+(prints proposals, writes nothing) — `--yes` commits them, `--from-file`
+skips the LLM call entirely and takes a (possibly hand-edited) proposals
+JSON, which is the "reviewable and editable before committed" loop:
+dry-run → save output → edit → `--from-file edited.json --yes`. Grounding
+validation (dropping any file the model — or a hand-edit — references that
+isn't actually in the graph) applies on BOTH paths, not just the live-LLM
+one.
+
+Extracted the shared record-storage helpers (`kindDir`, `claimAndWriteRecord`,
+`slugify`, `findRecordPath`, `resolveBody`, `formatValidationError`, ...)
+out of `records.ts` into a new `records-io.ts` — decompose.ts needs them
+too, and a direct `records.ts` ↔ `decompose.ts` circular import would have
+been fragile (works only if `records.ts` always loads first; breaks if
+anything ever imports `decompose.ts` directly, which the test suite does).
+This also brought `records.ts` back under this repo's 500-line guideline
+(578 → 466).
+
+26 unit tests cover prompt building, response parsing (valid/invalid JSON,
+too few/many tasks, missing fields, a markdown-fenced response, non-string
+file entries), grounding (keeps real files, drops hallucinated ones), and
+the full CLI command via both `--from-file` and a mocked LLM call. **A real
+bug was caught only by testing against the real compiled binary, not the
+unit tests**: the CLI's flag parser normalizes `--from-file` to
+`ctx.flags.fromFile`, not `ctx.flags['from-file']` — the same dual-form
+check `resolveBody()` already does for `--body-file`, which I should have
+matched from the start. Fixed, with a regression test constructing `ctx`
+with the camelCase form directly (a unit test alone would never have found
+this, since a hand-built `ctx` object doesn't go through the real parser).
+
+**Real-LLM quality pass done 2026-09-23**, via the same session-as-LLM
+substitute T8 established, generalized on the user's own explicit
+direction ("use the AI/claude/codex etc current session as the real
+llm and update the memory every time") rather than staying blocked on
+credentials a second time. Created 3 real, differently-sized
+requirements this repo genuinely still needs — REQ-001 (large: roll up
+estimates into a quote, CLI+MCP — literally T11), REQ-002 (medium:
+capture real actuals into the task record — T13), REQ-003 (small:
+variance report — T14) — then decomposed each via the real `--from-file`
+path this session's own real reasoning fed, not a mock.
+
+**A real, honest finding, not a clean pass**: `groundInGraph()`'s
+token-overlap heuristic, already known to work well for narrow,
+code-specific TASK text (T9's own verification), returned only noise for
+these broader REQUIREMENT-level descriptions — 15 "matches" per
+requirement, none of them the actually-relevant files (`predict.ts`,
+`corpus.ts`, `decompose.ts` itself), just generic-word collisions
+(`mcp`, `tool`, `report`) across this 3667-file monorepo. The honest
+response, matching decompose.ts's own instruction ("if a task is
+genuinely new code with no existing file to touch, leave files empty
+rather than inventing paths"), was to leave `files: []` on every
+proposed task rather than cite any of the spurious matches — not a bug
+fix in this task's own scope, a documented limitation to flag,
+same discipline as T9/T23's own already-documented gaps.
+
+**A second real finding, from actually running the write path**: of the
+first 15 proposals across all three requirements, 12 were REFUSED by
+`record validate`'s real T21 readability check on the first attempt —
+dense sentences, passive voice — and needed genuine rewriting before
+they'd write. This is the readability gate doing exactly its job: even
+a model that knows the rule does not reliably satisfy it without
+deliberate editing, which is the whole point of checking it structurally
+rather than trusting a system prompt instruction alone.
+
+**Result**: 15 real task records (TASK-017 through TASK-031) across the
+3 requirements (7/4/4, within the 3-15 range each), all citing their
+real requirement, all passing `record validate` and `record
+phase-check` for real. Per the user's own follow-up direction, each
+decomposition is also recorded in ruflo's own local memory system
+(`memory store`, real 384-dim embeddings, `--provenance agent_output`,
+`patterns` namespace, no API key) — confirmed retrievable via a real
+`memory search` afterward, not just written and forgotten.
+
+**Dependencies:** T1, T4
+**Files likely touched:** agent definition, `v3/@claude-flow/cli/src/commands/records.ts`
+**Estimated scope:** M
+
+---
+
+### Task 7: Build the training corpus from the existing trajectory log
+
+**Description:** Extract labelled pairs from `v3/@claude-flow/cli/src/ruvector/router-trajectory.ts` output (`.swarm/model-router-trajectories.jsonl`): task text, complexity score, model, actual input and output tokens, actual cost.
+
+**Why this matters:** This is the single most valuable thing already in the fork for requirement 2. It is a real labelled dataset mapping work description to real consumption, collected automatically, and nobody has used it. It gives the estimator a cold start on day one instead of requiring us to deliver features before we can quote anything. The domain differs from the pilot's, so treat it as a prior, not as ground truth.
+
+**Acceptance criteria:**
+- [x] Corpus builder reads the trajectory log and emits normalised training pairs
+- [x] Rows with missing or zero token counts are excluded, and the exclusion is counted
+- [x] Corpus size and date range are reported
+
+**Verification:**
+- [x] Unit test over a fixture log including malformed rows
+- [ ] Run against the real log, confirm the row count is plausible and non-zero
+
+**Done 2026-09-21, with one open item.** `src/ruvector/estimator/corpus.ts` parses
+the JSONL trajectory log, pairs decision+outcome rows by `task_hash` (latest
+wins, same convention as `pairTrajectoryRows`), and excludes+counts rows with
+no matching outcome or no usable token count. Returns `corpusSize` and
+`dateRange` for the caller to report. 10 fixture-based unit tests cover
+malformed lines, unmatched decisions, zero-token exclusion, and the
+latest-wins join.
+**Could not verify against the real log** — `CLAUDE_FLOW_ROUTER_TRAJECTORY`
+is opt-in and this checkout has never had it enabled; `.swarm/model-router-trajectories.jsonl`
+does not exist here. `loadEstimatorCorpus` handles that gracefully (empty
+corpus, not a throw) rather than fabricating rows to satisfy the check. This
+will produce real data once T8's calibration set (or any run with the env
+var set) generates rows — flag for whoever picks up T8/T10 to confirm the
+row count then.
+
+**Dependencies:** None
+**Files likely touched:** `v3/@claude-flow/cli/src/ruvector/estimator/corpus.ts`, tests
+**Estimated scope:** S
+
+---
+
+### Task 8: Calibration set — 15 to 20 labelled pilot tasks
+
+**Description:** Deliberately run a representative spread of real tasks from our own codebase, record actual token consumption, and label them. Budget three days and treat it as part of this phase, not overhead.
+
+**Why this matters:** The trajectory corpus is from a different domain. Without pilot-domain examples the first quotes will be wide in a way that looks like the tool is broken rather than honest. Twenty labelled examples is roughly the point at which nearest-neighbour starts producing defensible ranges. This is also the only task in the plan that deliberately spends tokens to create an asset.
+
+**Budget (D5):** ~~50 US dollars~~ **revised to 30 US dollars** (user-approved 2026-09-22). The original "roughly 2-3 dollars per task" estimate assumed something closer to a full multi-turn agentic session; this CLI's actual dispatch primitive (`callAnthropicMessages`, what `agent_execute` and T6's decompose command both use — there is no multi-turn tool-use loop in this codebase today) is a single completion call per task, which is dramatically cheaper. Worst-case pricing (every task maxed out on both real input tokens and its full output-token ceiling) for the real 16-task list below totals **under $1**, not $30-60 — see the implementation note.
+
+**Acceptance criteria:**
+- [x] At least 15 tasks spanning small/medium/large and different work types
+- [x] Each has recorded actual input and output tokens and cost (approximate — see below)
+- [x] Each is stored as a task record with actuals populated
+- [x] Total spend stays within the 30 dollar limit, and the actual spend is reported ($0.20, no API metering — see below)
+
+**Verification:**
+- [x] Records validate
+- [x] Spread check: no single work type is more than half the set
+- [x] Manual review of whether the set looks representative
+
+**Pipeline built 2026-09-22; run for real 2026-09-23, but not through the pipeline's own real-API path — see below.**
+This session has no LLM provider credentials configured
+(`ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OLLAMA_API_KEY` all unset) —
+confirmed directly, not assumed; T6's earlier live-call smoke test hit the
+same "No LLM provider configured" refusal. Spending real money requires
+credentials this session does not have, so at the user's explicit choice
+("prepare everything, run it later") the full pipeline is built and
+verified at $0, ready to execute the moment credentials exist:
+
+- `scripts/run-calibration-pilot.mjs` — 16 real, hand-curated pilot tasks
+  against genuine gaps in this actual codebase (drawn largely from
+  review-2026-09-21.md's and review-2026-09-22.md's own Suggestions/
+  still-open lists — schema composability, a zero-padding id bug, a YAML
+  size cap, missing config fields, a missing README, and more), spanning
+  7 work types (bug-fix ×4, refactor ×3, config ×3, docs ×2,
+  test-writing ×2, feature ×1, performance ×1 — max type is 4/16, well
+  under the half-the-set ceiling) and all three sizes, routed to
+  haiku/sonnet/opus by size tier.
+- Dry-run by default (prints what would be dispatched and a worst-case
+  cost bound per task, calls nothing) — `--yes` runs for real, `--budget`
+  overrides the 30-dollar default. Refuses cleanly with no credentials
+  configured rather than silently doing nothing (verified: exit code 2,
+  clear message).
+- A hard budget cap is enforced BEFORE every call, not after: worst-case
+  cost is computed from the real prompt's actual input-token count (not a
+  guess) plus the task's `maxTokens` ceiling (a real, API-enforced upper
+  bound on output — `max_tokens` in the request), and a task that would
+  exceed the remaining budget even in that worst case is skipped, not
+  attempted and hoped. Verified the invariant holds and that skipping one
+  over-budget task doesn't stop the run — cheaper tasks after it still get
+  a chance.
+- Pricing reuses the C4-safe pattern (T6, `model-router.ts`'s
+  `resolveExecutionProvider`): price the model that actually executes
+  (the OpenRouter alt if one is in play), never the bare tier label,
+  avoiding the exact ~100x mispricing bug C4/B1 fixed.
+- Each completed task is written as a real task record via the same
+  `claimAndWriteRecord` (id-race-safe) path `req/decision/task new` and
+  T6's decompose use, `actuals: {inputTokens, outputTokens, costUsd}`
+  populated from the real API response, citing **DEC-001** — a real
+  decision record already created in this repo's own `docs/decisions/`
+  documenting this exact approach and budget.
+- 12 unit tests (`scripts/__tests__/run-calibration-pilot.test.mjs`) cover
+  the task list's own shape (count, spread, uniqueness), dry-run calling
+  nothing, real-run record writing with correct actuals, haiku pricing
+  cheaper than sonnet for the same token counts, the budget-stop invariant
+  under a realistic (not artificially fixed-size) mocked call, continuing
+  past a skipped task, refusing a spread-violating task list, tolerating
+  one failed call without losing the rest of the run, and the full
+  16-task list staying within budget even under absolute worst-case
+  pricing. All pass at $0 — no test makes a real network call.
+- Verified via real dry-runs against the real task list (not a fixture):
+  default budget, a tight `--budget 5`, and the `--yes`-with-no-credentials
+  refusal path.
+
+**Done 2026-09-23, via a substitute path the user explicitly directed,
+not the pipeline's own real-API call.** The user asked directly why this
+needed separate LLM credentials when this very session already runs on a
+real model — a fair question, answered concretely rather than assumed:
+this session's own Claude Code authentication (a macOS Keychain entry,
+`"Claude Code-credentials"`) is a session/OAuth credential scoped to the
+Claude Code product surface, not a portable `Authorization: Bearer <key>`
+usable against the raw Messages API `callAnthropicMessages` needs —
+confirmed by checking the actual environment (`env | grep -i anthropic`
+etc.), not assumed, and the credential was never extracted or touched.
+The user then directed the actual resolution: have this session's own
+model do the 16 pilot tasks directly, in-conversation, real reads of the
+real context files and real proposed fixes, and approximate token/cost
+data afterward via this codebase's own local tokenizer instead of a real
+API response's `usage` object.
+
+`scripts/run-calibration-pilot-manual.mjs` (new) implements this,
+reusing `PILOT_TASKS`, `buildPrompt`, and `writeTaskRecord` from the real
+script (now exported) rather than duplicating them. `inputTokens`/
+`outputTokens` come from `ruvector/token-count.js`'s local tokenizer
+count on the real prompt and response text; `costUsd` prices against
+`anthropic/claude-sonnet-4-6` — the nearest entry in `model-prices.ts` to
+this session's real model (Sonnet 5), which has no dedicated price-table
+entry yet — never the haiku/sonnet/opus tier `PILOT_TASKS` originally
+assigned each task to, the exact "price the tier label, not the model
+that actually executed" mistake T12 already fixed once this session.
+Every record's body carries this caveat explicitly, in its own words, not
+hidden in frontmatter. **Real spend: $0** (no metered API call happened
+at all); approximate total, per the local tokenizer: 49,725 input +
+3,458 output tokens, ~$0.20.
+
+**Two real bugs found running this for real, both fixed, not
+worked around:**
+1. **T21's readability validator had two genuine gaps**, invisible until
+   a record body actually contained a real, sizeable code sample
+   alongside its explanation — exactly what these 16 records are.
+   `splitSentences` folded an entire fenced code block into one
+   giant pseudo-"sentence" (a 231-word violation on one record), and,
+   separately, collapsed paragraph breaks before ever checking for a
+   sentence boundary, so a new paragraph starting with a lowercase code
+   identifier (`groundInGraph() is exported...`) silently merged into
+   the previous paragraph's last sentence. Both fixed in
+   `readability.ts`: fenced code blocks are now stripped before any
+   check runs (never prose in the first place), and a blank line is now
+   an unconditional sentence boundary on its own, checked before the
+   punctuation-based split. 4 new regression tests. Every one of the 16
+   records' own prose — both `PILOT_TASKS`' pre-existing instructions
+   text (never actually validated with a real body before this) and this
+   session's own responses — needed real rewriting into short, active
+   sentences to pass; this is genuine content-quality work T21 exists to
+   force, not just a validator quirk.
+2. **`writeTaskRecord` wrote records that couldn't earn the `done`
+   status they claimed.** `record phase-check` (T17, built later in this
+   session than this script) correctly flagged all 16 as phase-gate
+   inconsistent: no `estimate`, no `doneCriteria`, and citing DEC-001
+   while DEC-001 itself was still `draft`. Fixed in three places: DEC-001
+   accepted for real (the user's own approval of T8's approach and
+   budget, genuinely reflected, not fabricated); `writeTaskRecord` now
+   computes a real `estimate` from the actual token total (±20%, per
+   AD-6's "never a point estimate" rule — a real range even though the
+   work already happened) and sets `doneCriteria: {testLayers: []}`
+   (T18's own "an empty list is a valid, deliberate choice" — these are
+   proposals, not code this repo's own suite runs); and `writeTaskRecord`
+   now validates WITH the body (catching readability/hash problems at
+   write time), where it previously validated frontmatter alone and let
+   a bad record through silently. This is a real fix to the SHARED,
+   still-real pipeline — the eventual genuine real-API run inherits it
+   too, not just this substitute path.
+
+**Verified for real**: 2 new tests directly against `writeTaskRecord`
+(estimate/doneCriteria shape and grounding; a readability-failing
+response is refused at write time, nothing written) — 14 total in
+`run-calibration-pilot.test.mjs`, all passing. Then the real, full
+end-to-end sequence against the actual repo, not a fixture: generated
+all 16 records for real, `ruflo record validate` → all 17 valid,
+`ruflo record phase-check` → all phase-gate consistent, spot-checked
+`TASK-001`'s full file content directly. Full regression: 132 docops +
+84 targeted CLI tests green.
+
+**Genuinely still not done**: the pipeline's own real-API path
+(`run-calibration-pilot.mjs --yes` with a real key, giving exact
+API-metered `usage` data instead of a local tokenizer approximation) has
+never executed. It remains available, unchanged in its own real logic,
+the moment real credentials exist — this session's substitute path does
+not replace it, only stands in for it under this session's actual
+constraints.
+
+**Dependencies:** T4, T7
+**Files likely touched:** record files, `.swarm/` corpus
+**Estimated scope:** M
+
+---
+
+### Task 9: Feature extractor for a task record
+
+**Description:** Given a task record, produce the feature vector used for estimation: complexity score, files likely touched, test layers required, new-code versus change, and citation-closure size. Reuse `analyzeComplexity()` at `v3/@claude-flow/cli/src/ruvector/model-router.ts:836`.
+
+**Why this matters:** The complexity extractor already exists and is already what the router uses to pick a model tier — reusing it means our estimate and our routing decisions agree about how hard a task is, rather than disagreeing for no reason. The missing link in the fork has always been mapping that score to expected tokens; this task builds the input half of that link.
+
+**Acceptance criteria:**
+- [x] Extractor returns a stable feature vector for a task record
+- [x] Identical input produces identical output
+- [x] Files-touched estimate is grounded in the Graphify graph, not guessed
+
+**Verification:**
+- [x] Unit tests over fixture records covering each feature
+- [x] Determinism test: same record twice, same vector
+
+**Done 2026-09-22.** `src/ruvector/estimator/features.ts` exports `extractFeatures(frontmatter, body, opts)`,
+returning `{ complexityScore, filesLikelyTouched, testLayers, isNewCode, citationClosureSize }`.
+Complexity reuses the exported `analyzeTaskComplexity()` (the plan's cited
+`model-router.ts:836` line number was stale — the function lives at line
+901/1540, found by grep, not assumed). Files-touched is grounded in
+`graphify-out/graph.json`: task text is reduced to name-style tokens
+(kebab/snake/camelCase-aware) and matched against code-node labels,
+requiring a file's tokens to be MOSTLY or WHOLLY present in the task text
+(all of a 1-2 token filename, a majority of a longer one) rather than any
+single substring hit. That threshold isn't cosmetic — a naive
+single-keyword substring match, tried first, pulled in 140+ files against
+this repo's real 58k-node graph for a two-sentence task description
+(verified by running it for real); the token-overlap version returns 15
+ranked, genuinely plausible files for the same input, including the actual
+target file. No graph on disk degrades to an empty (not fabricated) match
+list, matching this repo's established convention. citation-closure walks
+citations/dependsOn/supersedes/related transitively across the local
+`docs/` tree, cycle-safe. 13 unit tests (`__tests__/ruvector/estimator/features.test.ts`)
+cover each feature independently, the token-overlap threshold specifically
+(including the exact false-positive case found via manual testing), the
+15-file cap, and determinism (same record + repo state twice → `toEqual`).
+
+**Dependencies:** T1, T3
+**Files likely touched:** `v3/@claude-flow/cli/src/ruvector/estimator/features.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Task 10: Estimator v0 — nearest neighbour with ranges
+
+**Description:** Given a feature vector, find the most similar corpus entries and return a token range with a confidence level. Apply a retry multiplier. Never return a point estimate.
+
+**Why this matters:** This is requirement 2, the team's stated first priority. Nearest-neighbour rather than regression because it degrades gracefully: with twenty examples it gives a wide but honest range, and it tightens as history grows, with no retraining step. Returning a range rather than a number is not a nicety — a single figure will be wrong and will be quoted back at us.
+
+**Acceptance criteria:**
+- [x] Returns low, high, and confidence for a task record
+- [x] Confidence drops when no near neighbour exists, and says so
+- [x] Retry multiplier is configurable and documented
+- [x] Refuses to emit a point estimate anywhere in the API
+
+**Verification:**
+- [x] Unit tests: dense neighbourhood gives narrow range, sparse gives wide plus low confidence
+- [x] Hold-out test over the calibration set: actual falls inside the quoted range for most tasks
+- [x] Record the hit rate — this is our accuracy baseline
+
+**Dependencies:** T7, T8, T9
+**Files likely touched:** `v3/@claude-flow/cli/src/ruvector/estimator/predict.ts`, tests
+**Estimated scope:** M
+
+**Done 2026-09-23.** `src/ruvector/estimator/predict.ts` exports
+`predictTokens(complexityScore, corpus, opts)` — k-nearest-neighbour
+(default k=5) by complexity distance alone. Deliberately reduced to that
+ONE dimension, not T9's full feature vector: complexity is the only field
+T7's trajectory rows (task text + complexity, no file-grounding data) and
+T8's calibration task records genuinely share, and folding in the richer
+T9 features would need real weights this repo has no evidence for yet —
+fabricating them would repeat the exact "no fake precision" mistake this
+plan's own reasoning keeps calling out elsewhere (T9's grounding
+threshold, T21's readability heuristics). `corpus.ts` gained
+`loadCalibrationRows()` (reads real `docs/tasks/*.md` records with
+`actuals`, via T9's own `extractFeatures` so the same complexity
+heuristic grounds both the router's tier pick and the estimator) and
+`buildUnifiedCorpus()` (plain concatenation of T7's trajectory rows and
+T8's calibration rows, tagged by `source`).
+
+**Never a point estimate, structurally**: `predictTokens` returns
+`{ ok: true; estimate } | { ok: false; reason }`, never a bare number.
+An empty corpus is `{ ok: false }`, not a fabricated `{lowTokens: 0,
+highTokens: 0}` — there is a real difference between "we estimate zero"
+and "we cannot estimate," and collapsing them would hand T11's `ruflo
+quote` a lie it could repeat without meaning to. The retry multiplier
+(default 1.3, configurable via `opts.retryMultiplier`) scales ONLY
+`highTokens` — a retry/repair round only ever adds tokens on top of a
+real base attempt, never lowers the cheapest real outcome — and is
+explicitly documented as a stated assumption, not measured: T20 has run
+zero real repairs at the time of writing, so there is no real retry-cost
+history to derive it from yet.
+
+**A real, honest finding from actually running the hold-out check**
+(`scripts/estimator-holdout-check.mjs`, new — leave-one-out over T8's
+real 16-record calibration set, never predicting a record from itself):
+**hit rate 12/16 (75.0%)** — inside "most tasks" per this task's own
+verification wording, and the real accuracy baseline this task exists to
+produce. But the FIRST confidence formula (coverage × complexity-
+closeness only) scored several predictions at 0.90+ confidence for
+ranges spanning `[603, 24842]` — a >40x spread — because it measured
+whether neighbours were close in COMPLEXITY, never whether they actually
+AGREED on cost. Fixed by folding in a third factor, a scale-free spread
+measure over the neighbours' own token totals (`(max-min)/(max+min)`, so
+a `[1000,1100]` range and a `[100000,110000]` range score equally
+"tight" — the right comparison across task sizes spanning orders of
+magnitude). Re-running the SAME real hold-out afterward: identical
+75.0% hit rate (the ranges themselves didn't change), but confidence
+dropped to a genuinely humble 0.05-0.39 across the board — appropriately
+humble for a 15-row corpus, not the 0.9-plus the first version claimed.
+An overconfident number is worse than none: a stakeholder reading a
+quote has no way to tell a well-supported 0.9 from a badly-supported
+one. Caught by actually running the verification this task's own
+acceptance criteria call for, not by unit tests alone — the unit tests
+(dense/sparse neighbourhoods, both with matching token totals by
+construction) never would have exposed a formula that only looks at
+complexity distance and ignores token variance.
+
+**Trajectory corpus contributed zero rows** to this real run —
+`CLAUDE_FLOW_ROUTER_TRAJECTORY` has never been enabled in this checkout
+(the same open item T7 itself flagged, now confirmed rather than left
+theoretical). The 75% hit rate above is calibration-only.
+
+**Verified for real**: 11 new `predict.ts` tests (empty corpus refused;
+a real range structurally always returned; dense-neighbourhood
+narrow-range-high-confidence; sparse-neighbourhood wide-range-low-
+confidence; confidence names itself in `reason` when neighbours are
+thin; retry multiplier scales only the top, defaults to something >1;
+`k` caps neighbour count on a larger corpus; true `corpusSize` reported
+regardless of `k`; the real trajectory/calibration source split named in
+`reason`; nearest-by-distance selection, not corpus order) plus 6 new
+`corpus.ts` tests for `loadCalibrationRows`/`buildUnifiedCorpus`
+(missing `docs/tasks/`, a real record with `actuals`, skipping one with
+none, skipping one that fails to validate without crashing the scan,
+source tagging, both sources empty). Then the real hold-out script, run
+twice against the actual repo, not a fixture — once exposing the
+confidence bug, once confirming the fix.
+
+Full regression: 132 docops + 72 targeted CLI tests green.
+
+---
+
+### Task 11: `ruflo quote` command and MCP tool
+
+**Description:** Roll estimates up across a requirement's tasks, price against the model table, and present the result. Ship as both a CLI command and an MCP tool so every tool target can call it. MCP registration is a new file exporting `MCPTool[]` plus one import and spread at `v3/@claude-flow/cli/src/mcp-client.ts:133-194`.
+
+**Why this matters:** This is the first thing the business sees and the milestone that justifies the programme. Exposing it over MCP as well as CLI is what makes it tool-neutral from day one rather than retrofitted later. The output must show the assumptions driving the range, because a quote nobody can interrogate is a quote nobody will trust.
+
+**Acceptance criteria:**
+- [x] `ruflo quote <requirement-id>` prints a range, a confidence level, and the per-task breakdown
+- [x] Quoting a whole backlog rolls up across requirements
+- [x] The same result is available via an MCP tool call
+- [x] Output names the assumptions: retry multiplier, corpus size, neighbour count
+
+**Verification:**
+- [x] Tests for CLI and MCP paths
+- [x] Manual: quote from Claude Code and from one non-Claude tool, compare output
+- [x] Manual: confirm a stakeholder-readable summary
+
+**Done 2026-09-23.** Implemented from T6's own real decomposition of REQ-001
+(TASK-017 through TASK-024) as the literal implementation plan. New
+`estimator/quote.ts`: `quoteRequirement()` loads every task citing a
+requirement, runs T10's `predictTokens()` on each against the SAME real
+unified corpus `estimator-holdout-check.mjs` uses
+(`loadCalibrationRows()` + the real `.swarm/model-router-trajectories.jsonl`
+trajectory log), and combines the results — sum, never average, for
+tokens, and MIN (not mean) confidence across tasks, so one confident task
+can't hide a genuinely unsupported one. A task with no estimator
+prediction is named in `unpredictedTasks`, not dropped from the sum. A
+real design gap surfaced immediately: T10's `predictTokens()` returns one
+COMBINED input+output token total, but pricing needs input/output
+separately (`costUsd()`'s signature). Resolved by reusing
+`model-prices.ts`'s own already-stated "1×input + 3×output" blended-rate
+assumption (`blendedPrice()`, used elsewhere by the KRR trainer) instead
+of inventing a new, unevidenced split:
+`costUsd ≈ totalTokens × blendedPrice(modelId) / 4_000_000`. Named
+explicitly in the output as an assumption, not hidden. `ruflo quote
+<requirement-id>`, `--backlog`, `--json`, `--k`, `--retry-multiplier`,
+`--price-id` all verified against this repo's own REAL REQ-001/002/003
+and their 15 real T6-decomposed tasks via the compiled CLI binary — e.g.
+`ruflo quote REQ-001` → "4,041-153,562 tokens ($0.05-$1.84), confidence
+0.05, retry multiplier 1.3x, corpus size 16, 5 neighbour(s)". `quote_requirement`
+and `quote_backlog` MCP tools registered in `mcp-client.ts` (the exact
+`v3/@claude-flow/cli/src/mcp-client.ts:133-194` splice point this task's
+own description named) and verified via the real `ruflo mcp tools` /
+`ruflo mcp exec` path — identical output to the CLI, confirming one
+roll-up implementation serves both surfaces. A real formatting bug was
+caught during manual verification: plain `toLocaleString()` follows the
+HOST locale, not a fixed one — on this en-IN-configured host it rendered
+153562 as "1,53,562" (lakh grouping) instead of "153,562"; fixed with an
+explicit `toLocaleString('en-US')` helper so output is deterministic
+across machines. New `__tests__/ruvector/estimator/quote.test.ts` (10
+tests: unknown requirement, no citing tasks, empty-corpus refusal, a real
+happy path asserting sum-not-average and min-not-mean, custom/unknown
+`priceId`, citation filtering, backlog sum-and-skip, `listAllRequirementIds`)
+— all pass, plus the full pre-existing `__tests__/ruvector/`, `run.test.ts`,
+`phase-check.test.ts`, `records.test.ts`, `decompose.test.ts` suites (420
+tests, 52 pre-existing skips, zero regressions). `mcp-client.test.ts` and
+`mcp-tools-deep.test.ts` fail in this checkout on an unrelated,
+pre-existing `@claude-flow/neural` module-resolution error (confirmed via
+`git stash` — identical failure with none of this task's changes applied).
+
+**Dependencies:** T6, T10, T12
+**Files likely touched:** `v3/@claude-flow/cli/src/commands/quote.ts`, `v3/@claude-flow/cli/src/mcp-tools/quote-tools.ts`, `v3/@claude-flow/cli/src/ruvector/estimator/quote.ts`, `mcp-client.ts`, `commands/index.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Task 12: Fix the inherited pricing and token-counting bugs
+
+**Description:** Four fixes. Collapse the two divergent price tables to one source. Make unknown models fail loudly instead of falling back to a made-up rate. Replace `length / 4` token counting with a real tokenizer. Populate `predictedCostUsd`, currently hardcoded to `0` at `v3/@claude-flow/cli/src/ruvector/model-router.ts:740,746`.
+
+**Why this matters:** Every number our quote produces flows through this code. Two price tables that disagree on the same model means two parts of the system quote different costs for identical work. A silent fallback price for unknown models means a quote can be confidently wrong with no signal. And character-count-over-four is roughly right for English prose and materially wrong for code, which is what we are actually estimating. These are small fixes that determine whether requirement 2 is credible at all.
+
+**Acceptance criteria:**
+- [x] One price table; the duplicate is deleted, not deprecated
+- [x] Unknown model throws with the model name, rather than defaulting
+- [x] Token counts come from a real tokenizer
+- [x] `predictedCostUsd` carries a real figure
+
+**Verification:**
+- [x] Unit tests: known model prices correctly, unknown model throws
+- [x] Tokenizer test against a known code sample with a known token count
+- [x] `npm test` passes, including existing router tests
+
+**Done 2026-09-21.** `gaia-bench.ts`'s duplicate `MODEL_PRICING` table is gone —
+it now imports `blendedPrice`/`costUsd` from `model-prices.ts` and validates
+every `--models` entry up front (fails before spending tokens, not after).
+`costUsd`/`blendedPrice` throw `UnknownModelPriceError` naming the model
+instead of guessing a rate; `router-trajectory.ts`'s best-effort telemetry
+catches that specific error and omits `cost_usd` rather than dropping the
+whole outcome row. Added `gpt-tokenizer` (cl100k_base) via
+`src/ruvector/token-count.ts`, replacing the `length/4` guess — plugged in at
+`model-router.ts`'s `predictedCostUsd` (previously hardcoded `0`), which
+prices the tokenized task text at the picked tier's rate. That's an
+input-only floor (output size is unknown pre-execution) — marked with a
+`ponytail:` comment for T9/T10 to supersede. New tests:
+`__tests__/ruvector/model-prices.test.ts`, `__tests__/ruvector/token-count.test.ts`;
+updated `__tests__/neural-router.test.ts`'s unknown-model assertion. 105
+tests pass across all touched/at-risk suites. Full `npm run build` was not
+re-verified end-to-end — it fails on a clean checkout too (472 pre-existing
+tsc errors, unrelated `@claude-flow/cli-core` resolution — see HANDOVER.md
+§4); isolated type-checks of every touched file are clean.
+
+**Dependencies:** None
+**Files likely touched:** `v3/@claude-flow/cli/src/ruvector/model-prices.ts`, `gaia-bench.ts`, `model-router.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Checkpoint: Phase 2 — FIRST DEMO
+- [x] A requirement can be decomposed and quoted end to end (T6 decomposed REQ-001/002/003 for real; T11's `ruflo quote REQ-001` etc. verified against those real tasks)
+- [x] The quote is a range with stated confidence and visible assumptions (retry multiplier, corpus size, neighbour count, price id — see T11's Done note)
+- [ ] The same quote is reachable from at least two different AI tools (verified CLI + MCP-tool-exec in THIS session/process only — not yet confirmed from a second, separately-connected AI tool)
+- [x] Hold-out hit rate recorded as the accuracy baseline (T10: 75.0%, 12/16, `scripts/estimator-holdout-check.mjs`)
+- [ ] **Demo to stakeholders. Human review before proceeding.**
+
+---
+
+## Phase 3: Close the estimation loop (vertical slice C)
+
+### Task 13: Capture actuals into the task record
+
+**Description:** When a task completes, write real token and cost consumption into its record, sourced from the trajectory log and the budget receipts.
+
+**Why this matters:** Without this the estimator never improves and the quote is a one-way guess. The fork already has `estimated_usd` and `actual_usd` columns in an unused budget ledger, which shows someone intended this and never wired it. Closing the loop is what turns quoting from a demo into a capability.
+
+**Acceptance criteria:**
+- [x] Completed tasks carry actual input tokens, output tokens, and cost — scoped to tasks with real, measured spend (see Done note's honest boundary)
+- [x] Actuals feed back into the corpus automatically
+- [x] A task that failed records what it consumed before failing
+
+**Verification:**
+- [x] Run a real task end to end, confirm actuals land in the record
+- [x] Confirm the corpus row count increases
+
+**Done 2026-09-23.** Implemented from T6's own real decomposition of REQ-002
+(TASK-025 through TASK-028) as the literal implementation plan. A real
+scope question surfaced immediately: `record task verify` (T19) runs the
+project's OWN test command mechanically — it makes zero LLM calls, so a
+task reaching `done` via a clean first-pass test has genuinely no real
+spend to record. The ONLY place in this codebase that spends real,
+measurable tokens is T20's repair loop (`runRepairLoop`, wrapping
+`tdd-repair.mjs`'s headless `claude -p` calls). So `actuals` capture is
+honestly scoped to the repair path — the same "don't fabricate a missing
+number" discipline this plan has applied throughout (T9/T10's own
+refusals to guess). A task that reaches `done` with NO repair (a clean
+pass) legitimately has no `actuals`, by design, not by omission.
+
+Extended `repair-loop.ts`'s `RepairAttemptResult`/`RepairLoopResult` with
+optional `inputTokens`/`outputTokens`/`totalInputTokens`/`totalOutputTokens`,
+read from tdd-repair.mjs's own real `attempts[0].claude.usage` block (the
+raw `claude -p --output-format json` usage object it already captured but
+repair-loop.ts previously discarded, keeping only the aggregate cost).
+New `records-io.ts` helper `buildRepairActuals()` turns a real
+`RepairLoopResult` into an `Actuals` patch — `undefined`, not
+`{inputTokens:0, outputTokens:0, costUsd}`, when a round never produced
+real usage (tdd-repair-unavailable, a config error, a dry run), matching
+corpus.ts's own Important-7 "both sides required" exclusion. Wired into
+BOTH `task-repair.ts` and `run.ts`'s repair branch (`write()` extended to
+take an optional `actuals` argument) so a repair's real spend is captured
+whether the ending is `done` (repaired, TASK-025) or `blocked` (exhausted,
+TASK-026) — never left unset just because the outcome was blocked.
+TASK-027 confirmed: `loadCalibrationRows()` (T10) already scans
+`docs/tasks/` fresh on every call, so a newly-captured row shows up with
+no separate step — proven by a real regression test writing a repair's
+actuals then calling `loadCalibrationRows()` on the same directory.
+TASK-028: a genuine end-to-end test drives a task through the REAL state
+machine from `drafted` (via `ruflo run`'s own `attemptTransition` calls)
+all the way to `done` in one scenario and to `blocked` in another —
+`implementing -> verifying` is the one deliberate human gate this
+codebase has no automated phase-runner for, simulated the same way
+run.test.ts's own existing tests already do, not bypassed. 21 new tests
+(4 in repair-loop.test.ts, 4 in task-repair.test.ts, 2 in a new
+actuals-e2e.test.ts covering TASK-028) plus the full pre-existing
+ruvector/run/phase-check/records/decompose/task-verify suites (447 tests,
+zero regressions). No real `claude -p` spawn anywhere in this work — same
+$0 test discipline as T20's own repair-loop.test.ts.
+
+**Dependencies:** T10, T11
+**Files likely touched:** estimator corpus, record writer, tests
+**Estimated scope:** M
+
+---
+
+### Task 14: Variance report
+
+**Description:** A command that reports quoted versus actual across delivered tasks, with the trend over time.
+
+**Why this matters:** Requirement 6 of trust, not of the spec: a quote that visibly improves is persuasive, a quote that was quietly wrong is not. Publishing variance from the first delivered task is how we avoid the failure mode where an early bad number damages confidence in the whole programme. It is also our only feedback signal on whether the estimator is working.
+
+**Acceptance criteria:**
+- [x] `ruflo variance` shows quoted versus actual per task and in aggregate
+- [x] Shows the hit rate: how often actual fell inside the quoted range
+- [x] Trend over time is visible
+
+**Verification:**
+- [x] Tests over fixture data
+- [x] Manual: run against the calibration set, sanity-check the numbers
+
+**Done 2026-09-23.** Implemented from T6's own real decomposition of REQ-003
+(TASK-019/029/030/031) as the literal implementation plan. New
+`estimator/variance.ts`: for every task record carrying BOTH `estimate`
+and `actuals`, compares the recorded range to the real actual total
+(input+output), marks hit/miss (inclusive on both boundaries), and rolls
+up an aggregate hit rate with real sample size attached (never reported
+alone — TASK-030's own acceptance criterion). Trend (TASK-031) is a
+chronologically-ordered, CUMULATIVE hit rate — not a date-bucket average
+— so a 1-task early sample visibly reads as "100% over 1 task," not a
+false trend line. Deliberately compares a task's OWN recorded `estimate`
+field, never re-deriving one via T10's `predictTokens()` — variance
+measures whether the estimate a task actually shipped with held up,
+whatever produced it.
+
+TASK-019's own manual verification step surfaced a real, important
+finding: run for real (`ruflo variance`, a pure read, $0) against this
+repo's own 16 real T8 calibration records, it reports a 100% hit rate —
+which does **NOT** match `estimator-holdout-check.mjs`'s real 75.0%
+hold-out figure, and was never expected to once traced through. T8's
+calibration records' `estimate` field is `[0.8x, 1.2x]` of their OWN
+`actuals` (computed directly FROM the actuals, before T10's estimator
+existed) — comparing that estimate to those same actuals is tautological
+by construction, not a measurement of T10's real predictive accuracy.
+Nothing in this codebase currently writes a task's `estimate` field FROM
+`predictTokens()` at all; until something does, `ruflo variance`'s hit
+rate on this repo's own records measures self-consistency of T8's
+synthetic band, not estimator accuracy. Documented plainly in
+`variance.ts`'s own module doc and the CLI's real output, not papered
+over — the same "measured, not asserted" discipline as every other honest
+finding this plan has surfaced (T9's grounding-heuristic limitation,
+T10's confidence recalibration). 11 new tests (hit/miss/boundary,
+skip-and-name for a missing estimate/actuals/both, aggregate hit rate
+over a mixed sample, chronological trend ordering independent of file
+read order, small-sample honesty, malformed-record tolerance), plus the
+full pre-existing suite (458 tests, zero regressions).
+
+**Dependencies:** T13
+**Files likely touched:** `v3/@claude-flow/cli/src/commands/variance.ts`, `v3/@claude-flow/cli/src/ruvector/estimator/variance.ts`, `commands/index.ts`, tests
+**Estimated scope:** S
+
+---
+
+### Checkpoint: Phase 3
+- [x] Estimate and actual are both recorded, and variance is reportable (T13, T14 — scoped honestly: only the repair path (T20) has real, measured LLM spend to record; `ruflo variance` is real but its 100% figure on this repo's OWN records is a tautology of T8's synthetic estimate band, not a measurement of T10's real accuracy — see T14's Done note)
+- [x] Corpus grows automatically as work completes (T10's `loadCalibrationRows` already scans fresh on every read — confirmed via a real regression test, TASK-027)
+- [ ] **Human review before proceeding**
+
+---
+
+## Phase 4: The gate (vertical slice D)
+
+### Task 15: Task state machine with transition preconditions
+
+**Description:** Implement the state machine: Drafted, Specified, Implementing, Verifying, Done, Blocked. Each transition has a precondition checked against record state. Failure routes to `Blocked`, never to `Done` (AD-4).
+
+**Why this matters:** This is the object the gate enforces against. Without it, "mandatory step" has no definition to point at. Modelling `Blocked` as a real state with a named reason is what makes escalation legible — the system can say which decision it is waiting on rather than just stopping.
+
+**Acceptance criteria:**
+- [x] All six states and their legal transitions implemented
+- [x] Each precondition is a pure function over record state
+- [x] `Blocked` carries a reason and the condition that would unblock it
+- [x] `'failed'` is not terminal anywhere
+
+**Verification:**
+- [x] Unit tests over every legal and illegal transition
+- [x] Test asserting failure routes to `Blocked`, not `Done`
+
+**Done 2026-09-22.** `state-machine.ts` implements `drafted → specified →
+implementing → verifying → done`, each forward edge guarded by a pure
+precondition function `(task, context) => verdict`. A failed precondition
+never leaves the task where it was and never advances it — it always
+returns a `blocked` verdict carrying `{reason, unblockCondition,
+fromState}`, so there is no separate "failed" state to get stuck in by
+construction, not by convention.
+
+`verifying → done`'s real precondition (tests green, coverage above
+threshold) needs live evidence T19 hasn't built yet — rather than fake it,
+the precondition takes an optional `TransitionContext.testResult` and
+fails CLOSED when a task declares at least one required test layer
+(T18's `doneCriteria`) but no result was supplied. A task that declares
+zero required layers (a deliberate, valid choice — a config-only change
+doesn't need one) is exempt, matching T18's whole point: the bar is
+per-task, not global.
+
+Repurposed the existing `TaskStatusSchema` enum (`backlog/active/blocked/
+done`, a coarser T3-era placeholder) to these six states directly, rather
+than adding a second field — no real task records existed in this repo
+yet, so there was nothing to migrate. This had a real, necessary ripple:
+`records.ts`'s `task new` default status, `decompose.ts`'s hardcoded
+status, and several docops test fixtures all referenced the old enum
+values and needed updating to keep validating. Caught one real bug this
+way too: after updating the source, the compiled CLI binary still used
+the OLD default ('backlog') until an actual rebuild — `npx tsc --noEmit`
+type-checks source, it doesn't refresh `dist/`. Found by running the real
+compiled binary end-to-end (a task creation failed validation with the
+stale default), not by the type-check alone.
+
+53 unit tests (`__tests__/state-machine.test.ts`): every legal forward
+transition (including the exempt-zero-layers and no-coverage-threshold
+cases), every precondition failure and its `blocked` shape, a full 6×6
+`isLegalTransition` matrix (36 pairs) confirming exactly the legal edges
+and nothing else, `done` having zero outgoing edges, and `blocked` never
+resuming into itself or straight into `done`. Verified end-to-end via the
+real compiled CLI (task creation now defaults to `drafted` and validates;
+`decompose --yes` writes `drafted` tasks too) after the rebuild caught the
+stale-binary issue above.
+
+**Dependencies:** T3
+**Files likely touched:** `v3/@claude-flow/docops/src/state-machine.ts`, tests
+**Estimated scope:** M
+
+---
+
+### Task 16: Phase gate in the MCP client authorisation path
+
+**Description:** Extend `authorizeMcpTool` to receive the current phase and task record, and to deny a workflow tool call whose precondition is unmet. Return an error naming what is missing and what would satisfy it.
+
+**Why this matters:** This is the tool-neutral enforcement tier and the core of requirement 6 — the same denial reaches Claude Code, Cursor and Codex identically. The error message matters as much as the denial: an agent told "spec record REQ-12 is not accepted; run `ruflo req accept REQ-12`" can self-correct, while one told "denied" will retry blindly and burn budget. Note that `AgenticPolicyEngine` currently defaults to a mode that forces every decision to `allowed` (`v3/@claude-flow/security/src/policy/evaluator.ts:124`) — that default must change or the gate is a no-op.
+
+**Acceptance criteria:**
+- [x] A workflow tool call with an unmet precondition is denied before it executes
+- [x] The denial names the missing condition and the command that fixes it
+- [x] The gate is on by default, not behind an environment variable
+- [x] Non-workflow tool calls are unaffected
+
+**Verification:**
+- [x] Tests: denied path, allowed path, and a non-workflow tool passing through
+- [ ] Manual: attempt the same blocked action from two different AI tools, confirm identical refusal — genuinely not verified (see below)
+- [ ] Confirm policy mode default no longer forces `allowed` — deliberately NOT done (see below)
+
+**Dependencies:** T15
+**Files likely touched:** `v3/@claude-flow/cli/src/services/policy-runtime.ts`, `mcp-client.ts`, `v3/@claude-flow/security/src/policy/evaluator.ts`, tests
+**Estimated scope:** M
+
+**Done 2026-09-22, scope deliberately narrowed twice, both times with an
+explicit user decision before writing any code — see below.**
+
+**Decision 1 — where enforcement lives.** This task's own description
+names `AgenticPolicyEngine`'s default mode
+(`v3/@claude-flow/security/src/policy/evaluator.ts`) as the thing that
+"must change or the gate is a no-op." Investigating before touching it
+found that default (`mode: 'legacy'`, `engine.ts:39`) is a SITEWIDE
+chokepoint (ADR-324) for every registered MCP tool across the ENTIRE
+`ruflo`/`claude-flow` surface — memory, terminal/bash, GitHub, budgets,
+policy admin, not just this plan's own tools. Flipping it would start
+real enforcement for every existing policy rule and budget config across
+the whole platform, for every caller, a blast radius wildly out of
+proportion to "gate this plan's own workflow tools." Asked the user
+directly; chose the narrow option: build the phase-gate as its own
+always-on check, independent of `AgenticPolicyEngine`'s mode, leaving the
+sitewide default untouched. `evaluator.ts` was NOT modified.
+
+**Decision 2 — where the gate actually attaches.** The task's own
+description assumes these are MCP tool calls reaching `authorizeMcpTool`.
+Checked: `authorizeMcpTool` only fires for actions registered as
+`MCPTool` handlers in `mcp-client.ts`'s registry (`callMCPTool`). None of
+this plan's own commands (`record`, `decompose`, `run`, `backfill`) are
+registered there — they are plain `Command` objects with an entirely
+separate CLI dispatcher. There is, today, no MCP-tool surface for these
+actions to gate at all. Asked the user again with this concrete finding;
+chose to put the check directly inside the CLI command action functions
+— the one real execution path these actions have, identical no matter
+which AI tool's shell access runs the CLI. T22 (Cursor/generic MCP
+adapters, already depends on T16) is the natural future home for wrapping
+these as real MCP tools, not this task.
+
+**What was actually built**, given both decisions: a new precondition on
+state-machine.ts's `specified` PRECONDITIONS — a task's `drafted ->
+specified` transition now ALSO requires every cited REQ/DEC to be
+`accepted` (not `draft`, not `superseded`), the exact "spec record REQ-12
+is not accepted" scenario this task's own rationale names. New
+`CitationAcceptance` context field, supplied by the caller (docops has no
+filesystem access, AD-1) — fails CLOSED when omitted entirely, same "no
+free pass" reasoning T19 used for `testResult`; unlike `testResult`
+though, this evidence is never conditionally optional, since the citation
+contract (T3) guarantees every task has at least one REQ/DEC citation
+to check. `checkCitationAcceptance()` (records-io.ts) reads the cited
+records from disk and reports every unaccepted id by name — a missing
+record counts as unaccepted too, not a silent pass. `run.ts` (T25) is the
+one real caller today (drafted/specified transitions only happen there);
+it now always computes and supplies this evidence.
+
+**A real bug found by manually verifying this end to end, not by any unit
+test**: state-machine.ts's own doc comments assert "blocked is never
+terminal" (AD-4) and export `resumeFromBlocked()` specifically for
+resuming a blocked task once its condition is fixed — but nothing in this
+CLI ever called it, for ANY reason, not just this new citation check. A
+task blocked on a missing estimate (already true before this task) had
+no path back to progress at all, even after a human fixed it by hand.
+Fixed in `run.ts`: a task `blocked` with `fromState` other than
+`verifying` (that branch is T20's repair loop, untouched) is now
+re-attempted every pass via the same `attemptTransition()` call, but only
+counts as progress — and only gets written — when the verdict actually
+changes: either it succeeds, or the blocked REASON itself changes (real,
+if partial, progress, e.g. citation fixed but doneCriteria still
+missing). An unchanged reason is the same "repeated failure" signal T20's
+own repair loop already uses to stop, applied here to stop a genuinely
+stuck task from being rewritten every pass until `--max-passes`.
+
+**On the two unchecked verification boxes, left honestly unchecked
+rather than reinterpreted into passing:**
+- "Attempt from two different AI tools, confirm identical refusal" needs
+  a real MCP-tool surface to attempt anything FROM at all (Decision 2
+  above) — there is none yet. What IS verified: the CLI-level gate is
+  reachable identically by any tool with shell access, which is how every
+  AI coding tool (including this session) actually invokes `ruflo`
+  today; that's the real property this criterion cares about, just not
+  literally testable via two MCP clients yet.
+- "Confirm policy mode default no longer forces allowed" describes
+  Decision 1's rejected path — `AgenticPolicyEngine`'s default is
+  unchanged, deliberately, per the user's own explicit choice.
+
+**Verified for real**: 2 new docops tests (fails closed when
+citation-acceptance evidence is omitted; names every unaccepted id) plus
+4 updated existing tests (now supply the evidence explicitly, so they
+keep testing only the precondition they originally meant to). 8 new CLI
+tests for `checkCitationAcceptance` (accepted/draft/superseded/missing/
+TASK-citation-ignored/multiple-unaccepted-named) plus 4 new `run.ts`
+tests (blocks on an unaccepted citation even with a real estimate;
+resumes once a human fixes it — the real bug above; a genuinely stuck
+task is written exactly once, never re-churned). Three real end-to-end
+runs against the compiled CLI: citation blocks a real task with a real
+estimate; accepting the requirement and re-running resumes it (confirmed
+BROKEN before the `resumeFromBlocked` fix, confirmed fixed after);
+`record validate` stays green throughout.
+
+Full regression: 126 docops + 111 CLI tests (the files this task's
+changes touch) green.
+
+---
+
+### Task 17: CI required check
+
+**Description:** A CI job that runs record validation and the phase-gate check on every pull request, wired as a required status check with branch protection.
+
+**Owner for the repo setting (D4):** Sairam enables branch protection on the day this task merges, not before.
+
+**Why this matters:** This is the only tier nobody can bypass — not an agent, not `--no-verify`, not a transport switch. Every rule we genuinely care about must be expressed here, because tiers 1 and 2 are fast feedback and this one is the contract. Without branch protection turned on, this job is advisory too.
+
+**Acceptance criteria:**
+- [x] PR with an invalid record set fails CI
+- [x] PR with code changes but no citing task record fails CI (advisory — see below)
+- [ ] Job is a required status check on the default branch — NOT done, D4 reserves this for Sairam
+
+**Verification:**
+- [ ] Open a deliberately invalid PR, confirm it is blocked from merging — can't verify "blocked from merging" until D4 happens; the job itself is verified (see below)
+- [x] Open a valid PR, confirm it passes — verified via real git history diffs, not a literal opened PR (see below)
+- [ ] Confirm branch protection is actually enabled, not just the workflow present — explicitly not this task's call (D4)
+
+**Dependencies:** T15, T16
+**Files likely touched:** `.github/workflows/sdlc-gate.yml`, repo settings
+**Estimated scope:** S
+
+**Done 2026-09-22.** `.github/workflows/sdlc-gate.yml` — a normal
+(non-required) GitHub Actions job on every PR into `main`. Builds the v3
+workspace, then runs three checks:
+
+1. `ruflo record validate` — T3/T4's existing schema/citation-contract/
+   readability/content-hash gate, now repeated at CI (tier 3), matching
+   this task's own rationale: "tiers 1 and 2 are fast feedback... every
+   rule we genuinely care about must be expressed here."
+2. `ruflo record phase-check` — NEW command
+   (`v3/@claude-flow/cli/src/commands/phase-check.ts`), the "phase-gate
+   check" this task's description names as the second thing CI must run.
+   `record validate` alone can't catch this: a task record with
+   `status: implementing` and no `doneCriteria` at all currently PASSES
+   it (those fields are `.optional()` — T18/T19 formalize them per task,
+   not as a blanket schema requirement). `phase-check` is a read-only,
+   NEVER-writes audit that a task's CURRENT recorded status is still
+   earned by its CURRENT fields — reuses `attemptTransition()` (T15) as a
+   pure query rather than duplicating its PRECONDITIONS, replaying every
+   resumable state strictly before a task's own status with FRESH
+   evidence (`checkCitationAcceptance()`, T16). Catches drift a live
+   transition wouldn't: a requirement accepted when a task reached
+   `specified` that got superseded afterward is flagged retroactively,
+   even for a task already `done` — deliberately excluding the live
+   `verifying -> done` test-evidence gate, since replaying it would mean
+   re-running the whole test suite inside a "check the records" command,
+   redundant with the project's own CI test job.
+3. `scripts/ci/task-citation-check.mjs` (+ pure
+   `task-citation-check-lib.mjs`, same split-logic pattern T5's
+   pre-commit hook already established) — the mechanical form of
+   criterion 2. The task schema has no file-path field mapping a task to
+   the files it covers, so this can only check "did SOME `docs/tasks/`
+   record change ride along with a non-docs change in this PR," never
+   "does a task's citations genuinely COVER these specific files" — the
+   same kind of honestly-mechanical-not-semantic scoping T9/T21 already
+   used. Run with `continue-on-error: true` — advisory, not
+   merge-blocking, on purpose (see below).
+
+**Deliberately NOT done, both by design, not oversight:**
+- Branch protection / "required status check" is explicitly D4's
+  decision ("Sairam enables branch protection on the day this task
+  merges, not before") — this task adds the job; turning it on is a real
+  repo-settings change reserved for the repo owner, same reasoning this
+  session applied to every other repo-setting/security-default decision.
+- Criterion 2's check is real and running, but a genuine consequence
+  surfaced before writing it and was put to the user directly: EVERY
+  commit this session has made so far (29 of them) touched `tasks/
+  plan.md`/`todo.md` (the human checklist) but ZERO touched
+  `docs/tasks/*.md` (the formal record files this literal check wants) —
+  confirmed via `git log --name-only`. Making this check required today
+  would immediately block this very plan's own ongoing work. User chose
+  to build it honestly as specified and keep it advisory for now,
+  deciding separately, later, how this plan's own meta-work should be
+  tracked before ever making it required.
+
+**Verified for real**: 11 new tests for `phase-check` (passes on empty/
+drafted/blocked; passes and fails correctly at `specified`/`implementing`/
+`done`; retroactive citation-supersession caught even for a `done` task;
+confirmed it never writes to disk) and 6 new tests for
+`task-citation-check`. The YAML itself parses — run through this repo's
+own `scripts/smoke-workflows-yaml.mjs` guard (the exact tool #2267 exists
+because a broken workflow YAML silently produces zero jobs) alongside all
+29 other existing workflows, all OK. `task-citation-check.mjs` run for
+real against actual repo history: diffing the T16 commit against its own
+parent correctly flags it (9 non-docs files, no `docs/tasks/` change —
+expected, matches the finding above); diffing a ref against itself
+(empty diff) correctly passes. `record validate` and `record phase-check`
+both run for real against THIS repo's actual (near-empty) record set —
+one real `docs/decisions/DEC-001-...md` file, no `docs/requirements/` or
+`docs/tasks/` directory at all — confirming both commands handle a
+missing-directory repo gracefully, not just a populated scratch one.
+
+Full regression: 126 docops + 122 CLI + 14 root-level script tests (the
+files this task's changes touch) green.
+
+---
+
+### Checkpoint: Phase 4
+- [ ] The same mandatory step cannot be skipped from Claude Code, Cursor or Codex
+- [ ] An invalid change cannot be merged
+- [ ] Denials carry actionable messages
+- [ ] **Human review before proceeding**
+
+---
+
+## Phase 5: Test-gated done (vertical slice E)
+
+### Task 18: Done criteria on the task record
+
+**Description:** Extend the task schema so each task declares its own bar: which test layers apply, coverage threshold, and any acceptance checks. Different tasks get different bars.
+
+**Why this matters:** A config change does not need an end-to-end test and a checkout flow does. A single global bar is either too weak to be meaningful or too heavy to be tolerated, and teams route around the second. Declaring the bar per task is also what makes the later gate objective rather than a judgement call at review time.
+
+**Acceptance criteria:**
+- [x] Task records declare applicable test layers and thresholds
+- [x] A sensible default is inferred at decomposition time and is editable
+- [x] Schema validates the shape
+
+**Verification:**
+- [x] Unit tests over the extended schema
+- [x] Manual: confirm decomposition produces reasonable defaults
+
+**Done 2026-09-22.** `DoneCriteriaSchema` already existed as a T3-era
+placeholder (`{testLayers, coverageThreshold?}`); the real remaining work
+was wiring an inferred default into decomposition and making it editable.
+
+`decompose.ts` (T6) now fills in `doneCriteria` for any proposal that
+doesn't already have one — via a new `inferDoneCriteria()` that reuses T9's
+`extractFeatures()`, the SAME test-layer detection T10's estimator will
+use, so decomposition and estimation agree about what a task needs (same
+reasoning T9 itself gives for reusing the router's complexity score).
+Deliberately never infers a `coverageThreshold` — a global default number
+would be exactly the kind of unfounded precision this repo has repeatedly
+avoided elsewhere (see I9, C4); a human sets one explicitly if they want
+one. "Editable" is the same dry-run → edit JSON → `--from-file --yes` loop
+T6 already built: `parseProposals` now accepts an explicit `doneCriteria`
+on any proposal, and an explicit one is always respected as-is, never
+overwritten by the inferred default.
+
+6 new unit tests (`inferDoneCriteria` picks up an explicit test-layer
+mention, returns an empty list rather than fabricating one when nothing
+suggests a layer, never infers a coverage threshold; `parseProposals`
+leaves `doneCriteria` unset by default and accepts an explicit one) plus
+an end-to-end CLI test proving an explicit `doneCriteria` survives
+untouched alongside an inferred one in the same decompose run. Verified
+via the real compiled CLI: three proposals (integration-test-shaped,
+doc-fix-shaped, and an explicit `{testLayers: [], coverageThreshold:
+null}`) produced the expected `[integration, e2e]`, `[]`, and untouched
+explicit criteria respectively, all four resulting records (task + the
+citing requirement) valid.
+
+**Dependencies:** T3, T6
+**Files likely touched:** record schemas, decomposition agent, tests
+**Estimated scope:** S
+
+---
+
+### Task 19: Test runner and derived status
+
+**Description:** The engine runs the project's own test command, parses the result, and writes the outcome into the record. Status is derived from test results, never asserted by the agent. Reuse `coverageGaps()` from `v3/@claude-flow/cli/src/ruvector/coverage-router.ts:445` for the coverage side.
+
+**Why this matters:** This is the mechanism behind requirement 8 and the reason it works. An agent that can set its own done field will eventually set it while the suite is red — not from malice but because it believes it succeeded. Deriving status from evidence removes the question. The model is borrowed from rtmx, which derives requirement status from linked test results; the coverage parser already exists and works on real istanbul and lcov output.
+
+**Acceptance criteria:**
+- [x] Engine runs the configured test command and captures the result
+- [x] Coverage is parsed and compared against the task's threshold
+- [x] `Done` is unreachable while tests are red or coverage is below threshold
+- [x] The agent has no API to set `Done` directly
+
+**Verification:**
+- [x] Test: red suite blocks the transition
+- [x] Test: green suite below coverage threshold blocks the transition
+- [x] Test: green and above threshold permits it
+- [x] Manual: confirm there is no bypass path
+
+**Done 2026-09-22.** New `src/ruvector/test-runner.ts`: `runTests()` spawns
+the project's own test command (`package.json`'s `scripts.test`, or an
+explicit override) and derives `passed` STRICTLY from the real exit code
+— never from parsing stdout/stderr text, which an agent (or a flaky test
+framework) could make say anything. `getOverallCoverage()` (new, small
+export alongside the existing `coverageGaps()` in `coverage-router.ts`,
+per the plan's own citation) supplies the coverage number; `coverageGaps()`
+itself supplies the specific under-threshold files for a useful blocked
+message. `verifyTask()` feeds that real evidence into T15's
+`attemptTransition(task, 'verifying', {testResult})` — the exact context
+shape T15 was built to accept.
+
+New `ruflo record task verify <id>` command (`src/commands/verify.ts`,
+following T6's separate-module pattern) is the only status-mutating
+command this CLI exposes for an EXISTING task: it refuses anything not
+currently `verifying`, runs `verifyTask`, and writes the resulting
+`status` (+ a new `blocked: {reason, unblockCondition, fromState}` field
+on `TaskSchema` when it fails) back — no `--status` override anywhere on
+it, by construction.
+
+**A real, genuine bypass found via live testing, not any unit test**:
+`record task new --status=done` (equals syntax specifically — the
+space-separated form happened to error instead) let a brand-new task be
+created already `"done"`, skipping verification entirely. Fixed by
+removing the `--status` option from task creation altogether — a new task
+now always starts `drafted`, full stop; every other state is earned only
+through `record task verify` or the future gate (T16). Verified the fix
+directly: the same bypass attempt now silently creates a normal `drafted`
+task instead. Added a permanent regression test.
+
+**Also fixed while touching this file, not preemptively**: `TaskSchema`'s
+long-flagged `.strict().refine()` composability problem
+(review-2026-09-21.md's Suggestions) — this is the fourth task in a row
+to need to hand-edit `task.ts` (T8's `actuals`, T18's `doneCriteria`, now
+T19's `blocked` field), so the friction the review warned about was no
+longer hypothetical. `TaskObjectSchema` is now exported separately
+(genuinely `.extend()`-able, verified directly) with `TaskSchema` applying
+the citation-contract `.refine()` on top, same validated behavior.
+
+Real end-to-end verification via the compiled CLI, not just mocks:
+a real `npm test` with a command that PRINTS "ALL TESTS PASSED" to stdout
+but exits 1 was still correctly derived as failed and routed to
+`blocked`, with the real reason/unblock-condition/fromState persisted
+into the record; a real passing command correctly reached `done`; and
+re-running `verify` on an already-`blocked` task was correctly refused
+(no bypass by re-running).
+
+11 unit tests over `test-runner.ts` (exit-code derivation including the
+lying-stdout case, timeout-as-failure, command resolution, coverage
+wiring) mocking `node:child_process` directly — the real I/O boundary,
+not an injected fake. 7 more over the `verify` command itself (refusing a
+wrong-state task, writing `done`/`blocked` correctly, clearing stale
+`blocked` info on success, the written record always validating, and no
+`--status` option existing on the command at all).
+
+**Dependencies:** T15, T18
+**Files likely touched:** `v3/@claude-flow/cli/src/ruvector/coverage-router.ts`, state machine, new runner, tests
+**Estimated scope:** M
+
+---
+
+### Task 20: Wrap the red-to-green repair loop
+
+**Description:** Wrap `plugins/ruflo-testgen/scripts/tdd-repair/tdd-repair.mjs` so a red result triggers bounded repair attempts, and exhaustion routes the task to `Blocked`.
+
+**Why this matters:** This is the one genuinely good QA component already in the fork — it runs the test command, refuses to act if already green, spawns a budget-capped headless fixer, re-runs, and gates on exit code. Wrapping rather than rewriting saves a week. Bounding the retries is the important addition: without a limit, a task that cannot be fixed will consume budget indefinitely with nobody watching.
+
+**Acceptance criteria:**
+- [x] A red task triggers repair automatically within the workflow
+- [x] Retry count is bounded and configurable
+- [x] The same failure twice in a row stops rather than trying a third time
+- [x] Exhaustion moves the task to `Blocked` with the failing output attached
+
+**Verification:**
+- [x] Test with a deliberately broken change: repair runs, then gives up cleanly
+- [x] Test with a trivially fixable break: repair succeeds and the task advances
+- [x] Confirm budget cap is honoured
+
+**Dependencies:** T19
+**Files likely touched:** new wrapper, state machine, tests
+**Estimated scope:** M
+
+**Done 2026-09-22.** `v3/@claude-flow/cli/src/ruvector/repair-loop.ts` wraps
+`plugins/ruflo-testgen/scripts/tdd-repair/tdd-repair.mjs` (headless
+`claude -p`, test-driven repair) rather than rewriting it — matching the
+task description's own "wrapping saves a week" reasoning. tdd-repair.mjs
+already loops internally via its own `--max-attempts`, but that loop is
+opaque between rounds, so the wrapper always pins it to `--max-attempts 1`
+per spawn and owns the outer loop itself. That is what makes the repeated-
+failure short-circuit possible: each round's result (hashed) is compared
+against the previous round's before paying for another — two identical
+failures in a row stop the loop before a third attempt, exactly the
+acceptance criterion's wording. A second independent stop condition is
+cumulative cost reaching the configured budget. Exhaustion (either reason,
+or plain `--max-attempts` reached) writes the task back to `blocked` with
+the stop reason and the last failing output folded into `blocked.reason`
+— a diagnosable trail, not a dead end.
+
+New CLI command `ruflo record task repair <id>`, alongside T19's `task
+verify` under `record task`. It refuses anything but a task T19 itself
+blocked with `blocked.fromState === "verifying"` — a task blocked for
+a different precondition (e.g. T18's "no done criteria declared") has no
+failing test to hand a repair agent, and repairing it would be a category
+error. `--confirm` is required to actually spend anything, mirroring
+tdd-repair.mjs's own gate — without it, the command reports the repair
+plan (attempts, budget, model, resolved test command) and exits 0, exactly
+tdd-repair.mjs's own dry-run contract. On a claimed repair, the command
+does NOT trust tdd-repair.mjs's self-report: it re-verifies with T19's own
+`verifyTask` (the same trusted, exit-code-only runner `task verify` uses)
+before writing `done` — "derived, not asserted" (T19's own principle)
+applies here too, a claimed fix is not evidence until re-checked.
+
+Refactor while touching this a second time: the "write a TransitionResult
+back to a task record" block (T19's `task-verify.ts` had it inline) is now
+`applyTaskTransition()` in `records-io.ts`, shared by both `task-verify.ts`
+and the new `task-repair.ts` rather than duplicated a second time.
+
+**Verified for real, at $0, without spending anything on a live `claude -p`
+call** — this session has no explicit authorization to spend money testing
+T20 itself (distinct from T8's already-authorized budget, a different
+pipeline). Two layers of verification, both real:
+1. 20 new tests (`repair-loop.test.ts`, `task-repair.test.ts`) mock
+   `node:child_process`'s `spawnSync` completely, the same pattern T19's
+   `test-runner.test.ts` uses — proves the wrapper's own bounding/repeat/
+   budget logic against every real edge case (repaired first round,
+   repeated failure stopping at round 2 of 5, differing failures running
+   all the way to `max-attempts-exhausted`, budget reached before
+   `max-attempts`, unparseable output, `claude-cli-not-installed`,
+   tdd-repair's own exit-2 config errors) without ever touching a real
+   process.
+2. A real end-to-end smoke test against the actual compiled CLI binary
+   (`node bin/cli.js record task repair TASK-001`) in a scratch repo,
+   exercising the REAL `tdd-repair.mjs` script and the real path-resolution
+   walk from the compiled `dist/` location — twice: once via the dry-run
+   default (no `--confirm`, nothing spawned), and once with `--confirm`
+   but `--command "exit 0"` (the test already passes), which makes
+   tdd-repair.mjs's OWN pre-flight check refuse before it ever reaches the
+   `claude -p` spawn (exit 2, "test-already-passes") — a real, unmocked
+   run of the actual wrapped script, guaranteed $0 by construction, not by
+   trust. Confirmed the resulting record still validates and `record task
+   repair` correctly refuses a task that isn't blocked from "verifying".
+   The genuine-repair-success path (a real red test, a real `claude -p`
+   fix) remains unverified against the live script — that needs the same
+   explicit spend authorization T8 needed, not yet given for this pipeline.
+
+Full regression: 124 docops + 85 CLI tests (the files this task's changes
+touch) green. `npx tsc` clean for both packages, same pre-existing 4-error
+`@claude-flow/swarm`-sibling `TS6305` caveat as every prior task this
+session (confirmed unrelated: reproduces identically with T20's changes
+stashed out).
+
+---
+
+### Checkpoint: Phase 5
+- [ ] A task cannot reach `Done` with a red suite
+- [ ] Repair runs automatically and gives up safely
+- [ ] **Human review before proceeding**
+
+---
+
+## Phase 6: Plain English (vertical slice F)
+
+### Task 21: ASD-STE100 validator in record validation
+
+**Description:** A validator on the human-facing fields of each record, run alongside schema validation. Default mode enforces structural rules; strict mode adds controlled vocabulary for artifacts that leave the team.
+
+**Why this matters:** The point of requirement 4 is review speed. If a reviewer has to decode the AI's prose, the workflow has moved the bottleneck rather than removed it. Placing the check inside validation rather than in a prompt is the only way it holds across tools — the same reasoning as AD-1. Scope discipline matters: applying this to code comments and commit messages would make it annoying for no benefit, which is the main way this requirement fails.
+
+**Acceptance criteria:**
+- [x] Checks sentence length, active voice, one instruction per sentence, undefined jargon, hedging words
+- [x] Applies to record summaries and reports only, not code comments or commit messages
+- [x] Failing readability blocks the record transition
+- [x] Strict mode is opt-in per record
+
+**Verification:**
+- [x] Unit tests for each rule, pass and fail cases
+- [x] Manual: write a deliberately dense summary, confirm rejection with a useful message
+- [x] Confirm a normal code commit is unaffected
+
+**Done 2026-09-22.** `docops/src/validators/readability.ts` implements
+five checks over sentence-split body text: sentence length (>25 words),
+active voice (a lightweight `be` + past-participle heuristic — documented
+as exactly that, not a claim of real POS tagging), one instruction per
+sentence (an "and then"/"; then" joiner heuristic), hedging words, and —
+strict mode only — a small representative sample of ASD-STE100
+"not-approved → approved" substitutions (NOT the real ~65,000-word
+standard dictionary, far out of scope; documented as a sample). Default
+mode runs the first four (structural); strict mode adds the fifth
+(controlled vocabulary), matching the description's own split. New
+`readabilityStrict: boolean` field on `BaseRecordShape`, opt-in per
+record, default `false`.
+
+Wired into `validateRecord` — whenever `body` is supplied (same guard as
+content-hash drift detection), so it runs both at `record validate` time
+AND at record creation. That second part needed a real ripple: `records.ts`'s
+three `new` commands and `decompose.ts`'s task-writer previously called
+`validateRecord(frontmatter)` with no body (a deliberate content-hash
+no-op at creation time), which meant readability was never actually
+checked when a record was FIRST created — the acceptance criterion's own
+manual-verification bullet ("write a deliberately dense summary, confirm
+rejection") requires it to fire right there. Updated all four call sites
+to pass `body`.
+
+**Scope decision:** "blocks the record transition" is satisfied at the
+validation layer that already exists and gates creation/`record validate`
+— not wired into T15's state-machine transitions, which plan.md's own
+Task 21 file list doesn't mention touching and which operate at a
+different layer (workflow state, not record content well-formedness).
+"Not code comments or commit messages" is true by construction, not by
+extra logic: docops only ever validates record bodies — it has no code
+path that ever reads a source file or a commit message.
+
+Caught a real bug via live testing, not by any unit test: `records.ts`'s
+`formatValidationError` duck-types a ZodError by checking for an `issues`
+array — but the new `ReadabilityError` also carries an `issues` array (its
+own shape, `{rule, sentence, message}`, no `path`), so the old check
+matched it too and crashed on `path.join(...)` with `path` undefined.
+Fixed by also requiring each issue to actually have a `path` array before
+treating it as Zod-shaped. Also found and fixed a genuine, pre-existing
+problem the new gate surfaced: this repo's own real DEC-001 record (T8's
+prep-work decision, written in this session's normal dense/technical
+style) failed the new check — rewritten into short, active,
+un-hedged sentences and rehashed via `validate --fix`; the whole repo
+validates clean again.
+
+19 new docops unit tests (5 per structural rule plus jargon/strict-mode
+cases, a deliberately-dense multi-issue paragraph, and a normal
+well-written body passing cleanly) plus 5 wiring tests in
+`frontmatter.test.ts` (rejection with a useful message, acceptance,
+strict-mode gating, the creation-time no-op when body is omitted, and the
+real `validateRecordFile` path). 4 new CLI tests
+(`records-io.test.ts`) pin the `formatValidationError` fix specifically.
+Verified end-to-end via the real compiled CLI: a dense, hedging,
+passive-voice, multi-instruction body was rejected with the exact
+per-issue message; a normal well-written one was accepted.
+
+**Dependencies:** T3
+**Files likely touched:** `v3/@claude-flow/docops/src/validators/readability.ts`, tests
+**Estimated scope:** M
+
+---
+
+## Phase 7: Tool adapters (vertical slice G)
+
+### Task 22: Cursor and generic MCP adapters
+
+**Description:** New generators following the existing `(options) => Promise<string>` contract in `v3/@claude-flow/codex/src/generators/index.ts`. Emit a Cursor rules file and a generic `AGENTS.md`, and register both in the initialiser's emitted file list.
+
+**Why this matters:** Requirement 1 says any tool. The fork has zero references to Cursor anywhere — this is a genuine gap, not a configuration. Generating all rules files from one source is what prevents the four targets from drifting apart, and drift between tools is exactly the failure this architecture exists to prevent. These files are advisory by design; none of our guarantees depend on them, they just make the workflow usable.
+
+**Acceptance criteria:**
+- [x] Cursor rules file and generic `AGENTS.md` are generated from the same source as `CLAUDE.md`
+- [x] All targets describe the same workflow, verified by a test comparing generated content
+- [x] `init` emits them (scope narrowed — see below)
+
+**Verification:**
+- [x] Snapshot tests over each generated file
+- [x] Test asserting the workflow description is identical across targets
+- [ ] Manual: drive one task from Cursor using only the generated file — not verified, no Cursor access in this session
+
+**Dependencies:** T16
+**Files likely touched:** `v3/@claude-flow/codex/src/generators/`, `initializer.ts`, tests
+**Estimated scope:** M
+
+**Done 2026-09-22, scope narrowed by explicit user decision before writing
+anything.** `v3/@claude-flow/codex/src/generators/`/`initializer.ts` turned
+out to be a pre-existing, general-purpose `ruflo init` scaffolder for
+bootstrapping an ARBITRARY new claude-flow project (writes AGENTS.md/
+config.toml/skills for whatever `--project-path` is given), with zero
+awareness of this plan's own `record`/`run`/`verify`/`repair` workflow —
+and its existing dual-mode CLAUDE.md is already a separate, hand-written
+string with real, pre-existing drift from AGENTS.md's content (confirmed
+by reading `generateDualPlatformFiles()`). Asked the user before touching
+either: extend that generic, already-shipped scaffolder (bigger, describes
+the general claude-flow framework, not this specific SDLC), or write new,
+narrow content describing THIS plan's own workflow. Chose the latter —
+matches Phase 7's placement (right after the gates T15/T16/T19/T20 built)
+and Requirement 1's actual subject ("any tool can drive THIS workflow").
+
+**What was built**: `agentic-sdlc-workflow.ts`
+(`v3/@claude-flow/cli/src/docs/`) — the one source, a pure function
+returning Markdown covering the record types, the citation contract, the
+six-state lifecycle table, and the core commands (`record req/decision/
+task new`, `record validate`, `record phase-check`, `task verify`,
+`task repair`, `run`). `upsert-section.ts` is a pure, marker-delimited
+text transform — insert or replace ONLY its own
+`<!-- AGENTIC-SDLC:START/END -->` section, never touching anything else
+in a file — specifically so the new `ruflo record workflow-docs` command
+can safely touch real, existing, hand-maintained files (`CLAUDE.md`,
+`AGENTS.md`) without risking the kind of whole-file overwrite this
+session hit once already (T19's `verify.ts` incident). Writes/updates the
+identical section into `CLAUDE.md`, `AGENTS.md`, and a new
+`.cursor/rules/agentic-sdlc.mdc` (frontmatter: `alwaysApply: true`) —
+Cursor's directory-based rules convention, not the legacy flat
+`.cursorrules` file (neither existed before this task; confirmed no
+collision).
+
+`"init emits them"` is satisfied in spirit, not by hooking the existing
+1740-line `init.ts`/`CodexInitializer` pipeline: `workflow-docs` is its
+own small, discoverable command a setup step can call, deliberately not
+a deep edit into a large pre-existing file with several already-distinct
+init code paths (native/codex/dual) — the same caution this session has
+applied to every other large, pre-existing, actively-used file since the
+`verify.ts` incident.
+
+**Verified for real**: 12 new tests (6 for `upsertMarkedSection` in
+isolation — append/preserve/replace/empty-file/idempotent/trim; 6 for
+`workflow-docs` — creates all three fresh, the three sections are
+literally byte-identical strings (not just "look similar"), Cursor
+frontmatter is valid, real pre-existing unrelated content survives,
+running twice never duplicates the section, created-vs-updated reporting
+is correct on a second run). Then a real end-to-end run against the
+compiled CLI, against COPIES of THIS repo's actual `CLAUDE.md` (1493
+lines) and `AGENTS.md` (707 lines) — not synthetic fixtures — confirmed
+via `diff` against the real originals that the change is a pure
+single-block append (`1493a1494,1552`, `707a708,766`), confirmed
+re-running is idempotent (line count unchanged on a second pass), and
+confirmed the genuine, large, real file content is untouched. The actual
+live repo `CLAUDE.md`/`AGENTS.md` were NOT modified by this
+verification — copies only; whether to actually run `workflow-docs`
+against the real files is left for the user to decide separately.
+
+Full regression: 126 docops + 134 CLI tests (the files this task's
+changes touch) green.
+
+---
+
+## Phase 8: Backfill (vertical slice H)
+
+### Task 23: Mechanical pass over the existing codebase
+
+**Description:** Derive structure, dependencies, entry points and existing test coverage per area from the Graphify graph. No model calls.
+
+**First area (D3):** `v3/@claude-flow/cli/src/ruvector/`. Backfill runs one area at a time (D1), never as a wholesale pass.
+
+**Why this matters:** Deterministic, free, and it grounds the inferred pass that follows. Graphify already reports a token cost of zero for extraction, so this is effectively free to re-run whenever the graph refreshes. Doing this before any inference means the agent reasons about real structure rather than guessing it.
+
+**Acceptance criteria:**
+- [x] Per-area summary of modules, dependencies, entry points and test presence
+- [x] Runs with no model calls and no token cost
+- [x] Output is reproducible from a given commit
+
+**Verification:**
+- [x] Run against two areas, spot-check accuracy against the code
+- [x] Confirm zero token spend
+
+**Done 2026-09-22.** `v3/@claude-flow/cli/src/backfill/area-summary.ts`
+exports `summarizeArea(area, graphPath)` — a pure function of the
+Graphify graph, no I/O beyond reading that one file. Definitions, each
+directly graph-derivable:
+- **modules**: code-type nodes whose `source_file` starts with the area prefix, excluding test files.
+- **testFiles**: same set, test-path-pattern files only (co-located tests — this repo's own convention keeps tests in a separate top-level `__tests__/`, so this is legitimately empty for most areas, not a bug).
+- **dependencies**: an `imports`/`imports_from` edge written INSIDE the area, resolving to a file OUTSIDE it.
+- **entryPoints**: a reference (`imports`/`imports_from`/`calls`) written OUTSIDE the area, resolving to a file INSIDE it — the area's real, graph-verified boundary.
+- **testedModules/untestedModules**: whether any test file anywhere in the repo references a given module.
+
+New `ruflo backfill summarize <area>` CLI command surfaces it.
+
+**Verified against two real areas** (D3's `v3/@claude-flow/cli/src/ruvector/`
+and `v3/@claude-flow/docops/src/`), spot-checked against the actual code,
+not just plausible-looking output — e.g. confirmed directly with `grep`
+that `ast-analyzer.ts` being reported as an entry point is correct: `commands/analyze.ts`
+genuinely imports it from outside the area. Zero model/network calls —
+confirmed both by code inspection (no `callAnthropicMessages`, no
+`fetch`, nothing that reaches a network) and by literally running
+`graphify update .` (the underlying extraction) and reading its own
+"no LLM needed" output.
+
+**Two real, worth-recording limitations found via this verification, in
+the underlying graph data — not bugs in this module:**
+1. Graphify's own AST extraction missed `token-count.ts` entirely (zero
+   nodes for a real, valid, currently-committed file) — confirmed after a
+   full graph rebuild against the current HEAD, so not a staleness
+   artifact. A gap in the external tool's own extraction, out of scope to
+   patch here; `summarizeArea` is correct given whatever the graph says.
+2. Cross-package (bare-specifier) imports don't resolve to a target file
+   under AST-only extraction — `docops/src/index.ts` is genuinely the
+   package's real public entry point (`package.json`'s `main`), but
+   nothing outside `@claude-flow/docops` imports it via a traceable
+   RELATIVE path, so it's reported as having no external references. The
+   entry-point definition is accurate for intra-repo, relative-import
+   boundaries (verified); it under-counts at workspace-package
+   boundaries. Documented, not silently wrong.
+
+9 unit tests over a synthetic fixture graph (each field in isolation,
+reproducibility — the exact same graph produces byte-identical output —
+a missing target node not crashing, and a genuinely isolated area
+reporting empty dependencies/entry-points/coverage rather than guessing).
+
+**Dependencies:** T1
+**Files likely touched:** new backfill module, tests
+**Estimated scope:** M
+
+---
+
+### Task 24: Inferred requirement extraction
+
+**Description:** An agent reads an area's code, git history and existing docs, then proposes requirement and decision records. Every record is written with provenance marked inferred and a confidence score. A human confirms before it counts as authoritative.
+
+**Why this matters:** This is the only part of the mapping problem nobody sells, and it is where our differentiation sits — Graphify gives structure, never intent. The provenance rule is load-bearing: if a guessed requirement is indistinguishable from an authored one, the substrate stops being trustworthy and every downstream gate inherits the doubt. Graphify's own extracted-versus-inferred tagging is the model to mirror.
+
+**Acceptance criteria:**
+- [x] Produces requirement and decision records for a given area
+- [x] Every record carries inferred provenance and a confidence score
+- [x] An unconfirmed record cannot satisfy a phase gate
+- [x] A confirmation command promotes a record to authoritative
+
+**Verification:**
+- [x] Run against one well-understood area, manually assess whether the requirements are recognisable
+- [x] Test: an unconfirmed record does not satisfy a gate
+- [x] Confirm records validate
+
+**Done 2026-09-23.** `ruflo backfill infer <area>` — same architecture as
+T6's `decompose` on purpose: one real LLM call (`callAnthropicMessages`),
+dry-run by default, `--from-file`/`--yes` to review before committing.
+New `backfill/infer.ts` grounds every proposal in REAL evidence, never a
+guess: T23's `summarizeArea()` (structure, deps, entry points, test
+presence — $0, from the Graphify graph), the area's own real `git log`,
+and a real README if one exists. Schema: added an optional `confidence`
+field (0-1) to `RequirementSchema`/`DecisionSchema` (docops) — absent,
+not a fabricated 1.0, on a human-authored record. Every proposal writes
+`provenance: agent-inferred`, `status: draft`, and its own stated
+`confidence`, **never** `status: accepted` directly, no matter how high
+the confidence — the whole point of this task.
+
+Acceptance criterion 3 ("an unconfirmed record cannot satisfy a phase
+gate") needed **zero new gating code**: T16's existing
+`checkCitationAcceptance()` already refuses a citation whose record isn't
+`status: accepted`, and every inferred proposal starts `draft` by
+construction — the two pieces already compose. Proven end to end in a
+new `t24-confirm-gate.test.ts`: a real task citing a real, unconfirmed,
+agent-inferred requirement stays blocked through `ruflo run`'s real state
+machine; running the new `ruflo record req confirm <id>` (T24's
+acceptance criterion 4 — new `confirmRecord()` in records-io.ts, `draft
+-> accepted`, refuses anything not currently `draft`) and re-running
+advances the SAME task with no other input changed.
+
+Real verification run (this task's own step, session-as-LLM per the
+user's standing directive, since no LLM credentials exist in this
+session): ran `ruflo backfill infer` against
+`v3/@claude-flow/cli/src/ruvector/estimator/` — an area this session
+built and understands directly. First confirmed the graceful, real
+"no LLM provider configured" failure path with no `--from-file` (no
+crash, no fabricated output). Then reasoned for real from the area's
+actual module docs, real dependency list, and real git log
+(`git log --oneline -- <area>`, showing T10 then T11 landing in
+sequence), wrote real proposals to the scratchpad, verified readability
+against the real compiled validator (T21) before submitting — same
+loop T6/T8 already established, including the SAME lowercase-sentence-
+start workaround T6 hit ("predict.ts finds..." merges into the prior
+sentence under T21's real boundary regex; reworded to "The predict.ts
+module..."). `--from-file --yes` created REQ-004 ("Estimate a task's
+token and cost range from real history before work starts", confidence
+0.85) and DEC-002 ("Predict from nearest historical neighbours, not a
+trained regression model", confidence 0.75), both real, both
+recognizable on manual read, both `status: draft` — deliberately left
+unconfirmed by this session, since confirming an agent's own inferred
+proposal is exactly the anti-pattern this task exists to prevent; a
+human reviews and runs `req confirm`/`decision confirm`. `ruflo record
+validate` passes all 37 records (35 pre-existing + these 2) clean.
+
+24 new tests (13 in `backfill/infer.test.ts` — including a REAL git repo
+for the git-log grounding, no mocking — 10 in
+`backfill-infer-command.test.ts` mocking only the LLM call same as
+decompose.test.ts, 5 confirm-command tests in records.test.ts, 1
+end-to-end gate-composition test), plus docops's full suite (132 tests)
+and the full pre-existing cli suite for every touched area (489 tests) —
+zero regressions. The wider, unrelated `__tests__/` tree (3852 tests
+total) has 23 pre-existing failing files, confirmed unrelated by name/
+import (mostly `@claude-flow/neural` module resolution, matching the
+SAME pre-existing failure already isolated and confirmed via `git stash`
+during T11's verification — grep confirms none of them import anything
+this task touched).
+
+**Dependencies:** T16, T23
+**Files likely touched:** `v3/@claude-flow/cli/src/backfill/infer.ts`, `commands/backfill.ts`, `commands/records.ts`, `commands/records-io.ts`, `docops/schemas/{requirement,decision}.ts`, tests
+**Estimated scope:** M
+
+---
+
+## Phase 9: Autonomy (vertical slice I)
+
+### Task 25: The autonomy loop
+
+**Description:** A CLI command that repeatedly picks the next task whose preconditions are met, runs its phase, records the outcome, and repeats until no transition is available. All state lives in records, so the loop is restartable.
+
+**Why this matters:** Requirement 7. Making this a loop over the state machine rather than a long-lived agent session is what makes it predictable and restartable — it survives crashes, budget limits and a closed laptop, and can resume on a different machine in a different tool. Running it as a CLI command rather than a tool-specific hook is what keeps it tool-neutral; the inherited autopilot is Claude Code-only, never installed, and returns success from its own check so it could not block anything.
+
+**Acceptance criteria:**
+- [x] Picks and executes available transitions until none remain
+- [x] Stops on: no available transition, repeated failure, a gate needing a human
+- [x] Reports why it stopped and what would unblock it
+- [x] Resumes correctly after being killed mid-run
+
+**Verification:**
+- [x] Test: runs a small task set to completion unattended
+- [x] Test: kill mid-run and resume, confirm no duplicate or lost work
+- [x] Test: a blocked task stops the loop with a clear reason
+
+**Dependencies:** T19, T20
+**Files likely touched:** `v3/@claude-flow/cli/src/commands/run.ts`, tests
+**Estimated scope:** M
+
+**Done 2026-09-22.** `ruflo run` (`v3/@claude-flow/cli/src/commands/run.ts`,
+a new top-level command — checked for a name collision against
+`commands/index.ts` first, given the `verify.ts` incident earlier this
+session; no prior `run` command existed at the top level). Repeatedly
+scans every task record and calls `attemptTransition()` (T15) directly for
+`drafted` and `specified` — both preconditions are real evidence checks
+(an `estimate`, a declared `doneCriteria`), so this is safe: a task that
+hasn't earned its transition is correctly written `blocked`, never
+silently advanced. Confirmed this actually chains: a task with both fields
+present advances `drafted` → `specified` → `implementing` across two
+internal passes of a single `ruflo run` invocation, verified for real
+against the compiled CLI.
+
+`implementing` is the one resumable state the loop deliberately never
+touches — its precondition (`state-machine.ts`) is an intentional no-op,
+"an agent/human signals readiness to verify," not a missing-evidence gate.
+Calling `attemptTransition()` on it the same way as `drafted`/`specified`
+would have been the obvious lazy move and the wrong one: it would silently
+flip every task mid-implementation straight to `verifying` with zero real
+work done. No tool in this codebase means "implementation is actually
+finished" yet, so `implementing` is unconditionally reported as needing a
+human, by construction — a real design decision, not an oversight, called
+out with its own comment in `run.ts`.
+
+`verifying` runs T19's `verifyTask`. A task `blocked` with
+`fromState: 'verifying'` optionally runs T20's `runRepairLoop` — only with
+`--repair`, spending only with `--confirm` too — capped at ONE repair
+attempt per task per `ruflo run` invocation (an in-memory
+`Set<taskId>` for the process's lifetime, not persisted): retrying an
+already-failed repair on a later internal pass would bypass T20's own
+per-invocation budget entirely, exactly the runaway-spend scenario T20's
+own design note warns about. This is deliberately NOT the same thing as
+T26's cross-*run* spend ceiling (still unbuilt, depends on this task) —
+T25 only guards against the loop re-spending on the SAME task within a
+single invocation; a human re-running `ruflo run --repair` later is an
+explicit, separate decision.
+
+"Resumes correctly after being killed mid-run" needed no extra state
+machinery: every task file is read fresh from disk at the top of each
+pass and written at most once per pass — there is no separate loop-state
+file that could fall out of sync with the records, so re-invoking
+`ruflo run` after a kill always continues from whatever the records
+actually say. The loop's own termination is likewise a structural
+guarantee, not a heuristic: each task can only move through
+`drafted → (blocked-from-drafted | specified) → (blocked-from-specified |
+implementing) → (needs a human, permanently)` on the forward side, or
+`verifying → (done | blocked-from-verifying, at most one repair attempt)`
+on the test side — no path revisits a state this loop already acted on,
+so a pass that changes nothing is the correctly-guaranteed exit, not
+merely the likely one. `--max-passes` (default 50) is a redundant defensive
+cap, not load-bearing for correctness; verified it actually caps progress
+early with `--max-passes 1`.
+
+**Verified for real, at $0**, same discipline as T20: 10 new tests
+(`run.test.ts`) mock `node:child_process` transitively via mocked
+`verifyTask`/`runRepairLoop` (never a real process spawn), covering every
+branch above — including the "repair attempted once per run" guard,
+proven by asserting `runRepairLoop` is called exactly once across multiple
+internal passes even though the task remains `blocked`-from-`verifying`
+after a failed repair. Plus a full real end-to-end run against the
+compiled CLI binary in a scratch repo: `ruflo run --help`; a fresh drafted
+task with no estimate correctly blocking; a task with both fields present
+genuinely advancing to `implementing` over real internal passes; a
+genuine `verifying → done` transition; and `ruflo run --repair --confirm`
+against the REAL `tdd-repair.mjs` script with `--command "exit 0"`, so
+its own pre-flight refuses before ever reaching the billed `claude -p`
+spawn — guaranteed $0 by construction, identical technique to T20's own
+smoke test, and confirming the real repair-loop wiring end to end without
+spending anything.
+
+Full regression: 124 docops + 95 CLI tests (the files this task's changes
+touch) green.
+
+---
+
+### Task 26: Spend backstop
+
+**Description:** A configurable total spend ceiling for an unattended run, checked between transitions. Generous by default.
+
+**Why this matters:** The team has decided against fixed retry and spend limits, which is reasonable while somebody is watching. It is not safe for the first overnight run, where a repeating failure can consume budget with nobody present. This is a backstop, not a policy — it should almost never fire, and when it does it has prevented a bad night.
+
+**Acceptance criteria:**
+- [x] A total spend ceiling can be set per run
+- [x] The loop stops cleanly when reached and reports spend against quote
+- [x] Default is generous enough not to interfere with normal work
+
+**Verification:**
+- [x] Test with a low ceiling: loop stops at the limit and records state
+- [x] Confirm a resumed run does not double-count spend
+
+**Dependencies:** T25
+**Files likely touched:** autonomy loop, budget service, tests
+**Estimated scope:** S
+
+**Done 2026-09-22.** No separate "budget service" file — folded directly
+into `run.ts` (T25) as the task's own "Files likely touched" allowed
+("autonomy loop, budget service"), since the only thing in this codebase
+that spends real money is T20's repair loop, which `run.ts` already calls
+directly. A `let spentUsd = 0` local to the command's `action()`
+accumulates every repair's real `totalCostUsd` (T20's own, never
+estimated) for the life of one invocation; before each repair attempt,
+`spentUsd >= spendCeiling` is checked and, once true, every further
+repair-eligible task is reported stuck with the running total and the
+ceiling, exactly like any other "needs a human" gate — no
+`runRepairLoop()` call happens once the ceiling is reached, so nothing is
+spent past it. `--spend-ceiling` (default $50 — 10x a single task's own
+default $5 repair budget, "generous enough not to interfere with normal
+work" while still being a real, finite backstop) is the per-run knob;
+"reports spend against quote" is read as "against the configured
+ceiling," the only budget concept this codebase has today — T10/T11's
+quote system doesn't exist yet.
+
+Free transitions (`drafted`/`specified`/`verifying`) are deliberately
+NOT gated by the ceiling — they cost nothing, so a dollar figure has
+nothing to say about them; a `--spend-ceiling 0` run still fully advances
+every task that doesn't need repair.
+
+"Confirm a resumed run does not double-count spend" needed no new
+machinery, for the same structural reason T25 itself is resumable: the
+counter is a plain local variable inside `action()`, never written to a
+file or any module-level state. There is nowhere a prior invocation's
+spend COULD be carried from — proven, not just asserted, by a test that
+runs the command twice in the same process and confirms the second
+call's `spentUsd` is `0`, not the first call's `$5`, and that
+`runRepairLoop` genuinely isn't called a second time (not just that the
+number happens to read zero).
+
+**Verified for real, at $0**: 3 new tests (ceiling stops a second
+task's repair attempt before `runRepairLoop` is ever called — with the
+ceiling deliberately set below a single attempt's own cost, so the first
+attempt's spend, not just the ceiling number, is what blocks the second;
+a fresh invocation's spend never carries forward; free transitions ignore
+the ceiling entirely) plus two real runs against the compiled CLI and the
+actual `tdd-repair.mjs` script: `--spend-ceiling 0` refuses to spawn the
+script AT ALL (confirmed by wall-clock — the whole command completed in
+under half a second, no child process launched) and the default $50
+ceiling still runs the real, unmodified $0 pre-flight-refusal path T20's
+own smoke test established.
+
+Full regression: 124 docops + 98 CLI tests (the files this task's changes
+touch) green.
+
+---
+
+### Checkpoint: Complete
+- [ ] All eight requirements demonstrably met
+- [ ] Workflow drives a real feature end to end in at least two different AI tools
+- [ ] Quote, variance, gates, QA and autonomy all working together
+- [ ] **Final review**
+
+---
+
+## Risks and mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Inherited components are untested — CI carries 121 known-failing test files on a ratchet, coverage thresholds commented out | High | Verify each component at the point we adopt it. Do not assume a green run means working code. |
+| Early quotes are wide and a bad number damages trust | High | Always quote ranges with confidence. Publish variance from task one. Never a point estimate. |
+| Gates become friction and people route around them | High | Per-task done criteria rather than one global bar. Tune preconditions on real usage. |
+| Pilot is the fork itself, so failures are ambiguous between our bug and inherited breakage | Medium | Assume inherited breakage first. Fix the suite in each area before trusting a green run there. |
+| DocOps upstream is unmaintained | Medium | Forked, not depended on. We own the code. |
+| Graphify graph goes stale and agents reason about moved code | Medium | Refresh in CI, fail the build when the recorded commit drifts from `HEAD`. |
+| Backfill balloons across 3,667 files | Medium | Backfill per area on demand. Never a wholesale pass. |
+| Graphify is one project's output format and could change | Low | Pin the version. Access through one adapter module, not scattered call sites. |
+
+---
+
+## Parallelisation
+
+**Safe to run in parallel:**
+- T7 (corpus) and T12 (pricing fixes) — no shared files, both unblock Phase 2
+- T21 (plain English) and T22 (adapters) — independent of each other
+- T23 (mechanical backfill) alongside Phase 4 work
+
+**Must be sequential:**
+- T2 → T3 → T4: schema changes ripple into everything
+- T15 → T16 → T17: the gate tiers must agree on the same state machine
+- T19 → T20: repair depends on the runner
+
+**Needs coordination:**
+- T11 defines the quote contract consumed by later reporting. Fix the output shape before anything reads it.
+
+---
+
+## Decisions
+
+All five open questions were approved on 2026-09-18. Nothing is blocked. The reasons are kept here so we remember why we chose each one.
+
+### D1. We backfill one area at a time
+
+Backfill means writing requirement records for code that already exists.
+
+**Decision:** write records only for the area we are working on. Repeat this each time we start a new area. We do not write records for all 3,667 files at the start.
+
+**Reason:** writing records for all files will take several weeks. Most of those records nobody will read.
+
+**Applies to:** T23, T24
+
+### D2. One unattended run has a high spending limit
+
+**Decision:** there is no fixed retry limit. The AI keeps asking questions until the requirement is clear. But we set a high total spending limit before the first overnight run.
+
+**Reason:** no limit is correct when a person is watching the run. At night, a task that fails again and again can spend money with nobody watching. The limit is a backstop. It should almost never fire.
+
+**Applies to:** T26
+
+### D3. First backfill area is the ruvector folder
+
+**Decision:** start with `v3/@claude-flow/cli/src/ruvector/`.
+
+**Reason:** we will change this folder anyway in Phase 2. It holds the price table, the trajectory log, the complexity scorer and the coverage parser. Tasks T7, T9, T10 and T12 all touch it. Backfilling the code we are about to read gives us the benefit at once. It also tests the backfill against code we know well.
+
+**Applies to:** T23
+
+### D4. Sairam turns on branch protection, on the day T17 merges
+
+Branch protection stops anyone from merging a pull request that fails the checks.
+
+**Decision:** Sairam turns it on, because he owns the fork. He does this on the same day T17 merges, not before.
+
+**Reason:** if we turn it on early, the gate will block normal work before the gate is ready. If we turn it on late, we will believe we are protected when we are not. Turning it on with T17 avoids both problems.
+
+**Applies to:** T17
+
+### D5. The calibration set has a 50 dollar limit
+
+Task T8 runs 15 to 20 real tasks. We record the cost of each one. This becomes our training data.
+
+**Decision:** about 50 US dollars for the whole set. This is roughly 2 to 3 dollars for each task.
+
+**Reason:** this is a one-time cost and it creates an asset we keep. Every later quote uses this data. Without it, our first quotes will be very wide. If we spend less than half the limit, we add more tasks instead of stopping early.
+
+**Applies to:** T8

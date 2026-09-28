@@ -275,6 +275,9 @@ env:
   NODE_VERSION: '20'
   PNPM_VERSION: '8'
 
+permissions:
+  contents: read
+
 jobs:
   # #2267 + #2257 regression guards — fast, no install, run first so any
   # YAML or router regression is caught at PR-time, not at scheduled cron.

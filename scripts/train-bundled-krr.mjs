@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
 // iter 35 — single source of truth for prices; replaces the duplicated
 // BLENDED_PRICES table that lived here pre-iter-31.
-import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
+import { priceKnownCandidates } from './train-price-guard.mjs';
 
 const ARGS = (() => {
   const a = { perBucket: false };
@@ -36,13 +36,11 @@ const seedPath = resolve(ASSETS_DIR, 'seed-rows.json');
 
 console.log(`[train] reading measured seed corpus from ${seedPath}`);
 const allRows = JSON.parse(readFileSync(seedPath, 'utf8'));
-const corpusModels = Object.keys(allRows[0].scores);
-console.log(`[train] ${allRows.length} rows, dim=${allRows[0].embedding.length}, candidates=${corpusModels.length}`);
+console.log(`[train] ${allRows.length} rows, dim=${allRows[0].embedding.length}, candidates=${Object.keys(allRows[0].scores).length}`);
 
-// Build the prices map for ONLY the candidates present in the corpus.
-// blendedPrice() falls back to $1/Mtok blended for unknown ids — same
-// behaviour as the previous `?? 1.00`.
-const prices = Object.fromEntries(corpusModels.map(m => [m, blendedPrice(m)]));
+// Build the prices map for ONLY the candidates present in the corpus,
+// skipping (and excluding from training) any with no known price.
+const prices = priceKnownCandidates(allRows, 'train');
 
 // Train ONE KRR over a row subset + write it to `outPath`.
 // Returns { lambda, looQuality, trainMs, size }.

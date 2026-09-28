@@ -118,10 +118,10 @@ export class ReleaseManager {
         const commitMessage = `chore(release): ${result.newVersion}`;
 
         // Stage changes
-        this.execCommand(`git add package.json ${changelogPath}`);
+        this.execGitArgs(['add', 'package.json', changelogPath]);
 
         // Commit
-        this.execCommand(`git commit -m "${commitMessage}"`);
+        this.execGitArgs(['commit', '-m', commitMessage]);
 
         result.commitHash = this.execCommand('git rev-parse HEAD', true).trim();
       }
@@ -130,7 +130,7 @@ export class ReleaseManager {
       if (createTag && !dryRun) {
         result.tag = `${tagPrefix}${result.newVersion}`;
         const tagMessage = `Release ${result.newVersion}`;
-        this.execCommand(`git tag -a ${result.tag} -m "${tagMessage}"`);
+        this.execGitArgs(['tag', '-a', result.tag, '-m', tagMessage]);
       }
 
       result.success = true;
@@ -219,11 +219,9 @@ export class ReleaseManager {
    */
   private parseCommits(range: string): GitCommit[] {
     const format = '--pretty=format:%H%n%s%n%an%n%ai%n---COMMIT---';
-    const cmd = range
-      ? `git log ${range} ${format}`
-      : `git log ${format}`;
+    const args = range ? ['log', range, format] : ['log', format];
 
-    const output = this.execCommand(cmd, true);
+    const output = this.execGitArgs(args, true);
     const commits: GitCommit[] = [];
 
     const commitBlocks = output.split('---COMMIT---').filter(Boolean);
@@ -344,8 +342,8 @@ export class ReleaseManager {
   }
 
   /**
-   * Execute command safely with validation
-   * Only allows git commands from the allowlist
+   * Execute a FIXED, literal git command with no dynamic values (still
+   * checked against the allowlist as defense in depth).
    */
   private execCommand(cmd: string, returnOutput = false): string {
     // Validate command against allowlist
@@ -358,6 +356,32 @@ export class ReleaseManager {
         stdio: returnOutput ? 'pipe' : 'inherit',
         timeout: 30000, // 30 second timeout
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer limit
+      });
+      return returnOutput ? output : '';
+    } catch (error) {
+      if (returnOutput && error instanceof Error) {
+        return '';
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Execute git with argv passed directly to the process — no shell ever
+   * parses these arguments, so a value like a commit message, tag name, or
+   * changelog path can never break out into a second command regardless of
+   * its content (CodeQL js/shell-command-constructed-from-input). Prefer
+   * this over execCommand() whenever any part of the command is not a
+   * fixed literal.
+   */
+  private execGitArgs(args: string[], returnOutput = false): string {
+    try {
+      const output = execFileSync('git', args, {
+        cwd: this.cwd,
+        encoding: 'utf-8',
+        stdio: returnOutput ? 'pipe' : 'inherit',
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
       });
       return returnOutput ? output : '';
     } catch (error) {

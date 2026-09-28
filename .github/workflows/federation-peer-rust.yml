@@ -25,6 +25,9 @@ on:
       - '.github/workflows/federation-peer-rust.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   stable-noop:
     runs-on: ubuntu-latest

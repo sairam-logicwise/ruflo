@@ -49,6 +49,9 @@ on:
       - 'plugins/ruflo-metaharness/scripts/_harness.mjs'
       - '.github/workflows/oia-audit-weekly.yml'
 
+permissions:
+  contents: read
+
 jobs:
   audit:
     runs-on: ubuntu-latest

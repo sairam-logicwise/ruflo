@@ -34,6 +34,9 @@ on:
       - 'v3/@claude-flow/cli/scripts/prepare-publish.mjs'
       - 'v3/@claude-flow/cli/package.json'
 
+permissions:
+  contents: read
+
 jobs:
   guard:
     runs-on: ubuntu-latest

@@ -15,6 +15,7 @@
 import { open, readFile, writeFile, stat as fsStat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
+import { countTokens } from '../ruvector/token-count.js';
 
 // ── GGUF Metadata Value Types ───────────────────────────────
 
@@ -300,13 +301,17 @@ export class GgufEngine {
             ? request.stopSequences.map((s: string) => new this.llamaCpp.LlamaText([s]))
             : undefined,
         });
-        // Use llama.cpp tokenizer for accurate count when available, else estimate
+        // Use llama.cpp's own tokenizer for an exact count when available;
+        // otherwise fall back to a real BPE count (cl100k_base) rather than
+        // a length/4 guess — this model's actual vocab may differ, but a
+        // real tokenizer's subword behavior is still a closer stand-in than
+        // character division (T12/Important 18, review-2026-09-21.md).
         let tokensUsed: number;
         try {
           const seq = this.llamaContext.getSequence();
-          tokensUsed = seq.tokenCount ?? Math.ceil(text.length / 4);
+          tokensUsed = seq.tokenCount ?? countTokens(text);
         } catch {
-          tokensUsed = Math.ceil(text.length / 4); // ~4 chars per token heuristic
+          tokensUsed = countTokens(text);
         }
         return {
           text, model: modelName, tokensUsed,

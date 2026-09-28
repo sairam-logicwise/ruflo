@@ -24,6 +24,9 @@ on:
       - '.github/workflows/adr-166-mcp-bridge-security.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   static-source-lock:
     name: Static-source security lock

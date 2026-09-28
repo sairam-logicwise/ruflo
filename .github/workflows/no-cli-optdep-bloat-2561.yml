@@ -29,6 +29,9 @@ on:
       - '.github/workflows/no-cli-optdep-bloat-2561.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   guard:
     runs-on: ubuntu-latest

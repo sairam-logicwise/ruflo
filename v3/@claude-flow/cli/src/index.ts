@@ -825,5 +825,22 @@ export type {
   PerformanceMetrics,
 } from './production/monitoring.js';
 
+// review-2026-09-23.md, "On C1's verification method": running this file
+// directly (e.g. `npx tsx src/index.ts`, or `node dist/src/index.js`
+// without going through `bin/cli.js`) used to exit 0 with zero output —
+// this module only EXPORTS the CLI class, it never calls `.run()`, despite
+// its own header comment calling it the "Main Entry Point". That silence
+// cost a reviewer a full verification path. `bin/cli.js` is the real
+// executable (fast --version path, MCP-mode stdin detection, console
+// filtering for embedder noise) — this file is a library surface. Loud
+// and immediate is better than another silent 0 here.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  console.error(
+    'This file is a library module, not the CLI executable — it only exports the CLI class and never runs it.\n' +
+    'Run the CLI via `bin/cli.js` instead (e.g. `node bin/cli.js <command>`, or the `ruflo`/`claude-flow` bin after `npm install`).',
+  );
+  process.exit(1);
+}
+
 // Default export
 export default CLI;

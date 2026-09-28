@@ -8,6 +8,7 @@
 // artifacts; commands call `mcp__plugin_ruflo-core_ruflo__memory_store` with `agentdbRecord(run)`).
 
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { RunKind, RunRecord } from '../domain/types.js';
 
@@ -19,12 +20,16 @@ export interface RunStore {
 
 let counter = 0;
 
-/** Generate a run id. Uses crypto.randomUUID when available, else a monotonic fallback. */
+/**
+ * Generate a run id. Uses crypto.randomUUID when available, else
+ * node:crypto's randomBytes — never Math.random() (CodeQL
+ * js/insecure-randomness), even on the fallback path.
+ */
 export function newRunId(kind: RunKind): string {
   const uuid =
     typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID().slice(0, 8)
-      : `${(counter++).toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+      : `${(counter++).toString(36)}${randomBytes(4).toString('hex')}`;
   return `${kind}-${uuid}`;
 }
 

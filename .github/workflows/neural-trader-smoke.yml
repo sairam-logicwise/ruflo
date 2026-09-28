@@ -27,6 +27,9 @@ on:
     # changes (e.g. a new `neural-trader` release breaks the contract).
     - cron: '17 6 * * 1'   # Mondays 06:17 UTC
 
+permissions:
+  contents: read
+
 jobs:
   runtime-smoke:
     runs-on: ubuntu-latest

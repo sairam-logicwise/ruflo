@@ -9,6 +9,9 @@ on:
       - '.claude-plugin/**'
       - 'plugins/**'
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest

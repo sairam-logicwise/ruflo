@@ -1,0 +1,60 @@
+name: SDLC Gate (T17, agentic SDLC plan)
+
+# T17 (tasks/plan.md): "a CI job that runs record validation and the
+# phase-gate check on every pull request, wired as a required status
+# check with branch protection." This workflow is the job; making it a
+# REQUIRED check and turning on branch protection is explicitly Sairam's
+# call (D4, plan.md: "Sairam enables branch protection on the day this
+# task merges, not before") — this file alone is advisory only, exactly
+# as the plan's own rationale describes ("Without branch protection
+# turned on, this job is advisory too").
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '8'
+
+jobs:
+  sdlc-gate:
+    name: Record validation + phase-gate consistency (T15/T16/T17)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — task-citation-check diffs base...head
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: v3/pnpm-lock.yaml
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install v3 workspace dependencies
+        working-directory: v3
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (so `ruflo record`/`phase-check` can run)
+        # --no-bail + || true: same tolerance v3-ci.yml's own build step
+        # uses — this job only needs docops/cli-core/cli to build cleanly;
+        # an unrelated package failing elsewhere in the workspace (the
+        # long-documented @claude-flow/swarm TS6305 gap) shouldn't block
+        # the gate this job exists to run.
+        working-directory: v3
+        run: pnpm --recursive --no-bail run build || true
+
+      - name: record validate (T3/T4 schema, citation contract, readability, content hash)
+        run: node v3/@claude-flow/cli/bin/cli.js record validate
+
+      - name: record phase-check (T16/T17 — a task's recorded status still earned by its current fields)
+        run: node v3/@claude-flow/cli/bin/cli.js record phase-check
+
+      - name: task-citation-check (T17 criterion 2 — advisory, see header comment above)
+        continue-on-error: true
+        run: node scripts/ci/task-citation-check.mjs "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

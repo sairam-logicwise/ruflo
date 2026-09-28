@@ -1,0 +1,539 @@
+/**
+ * `ruflo record` — T4, agentic SDLC plan (tasks/plan.md). CLI over the
+ * typed record substrate T3 built (@claude-flow/docops): requirement,
+ * decision, task.
+ *
+ * Nested under `record` (`ruflo record req|decision|task|validate`) rather
+ * than three separate top-level commands as the plan's literal wording
+ * suggested ("ruflo req new", "ruflo task new") — `ruflo task` already
+ * exists for swarm/agent runtime task orchestration (create/list/status/
+ * cancel, agent assignment), a completely different concept from a
+ * planning-record Task. Confirmed with the repo owner before naming this;
+ * `record` avoids the collision and matches the plan's own file list (one
+ * `records.ts`, not three command files).
+ *
+ * Records are stored one markdown file per record under
+ * `docs/{requirements,decisions,tasks}/`, matching @claude-flow/docops's
+ * "diff and merge sensibly as files in git" design.
+ */
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Command, CommandContext, CommandResult } from '../types.js';
+import { output } from '../output.js';
+import {
+  RECORD_PREFIXES,
+  computeContentHash,
+  parseRecordFile,
+  serializeRecordFile,
+  validateRecord,
+  validateRecordFile,
+  ContentHashMismatchError,
+  type RecordKind,
+} from '@claude-flow/docops';
+import {
+  kindDir,
+  ensureDir,
+  listRecordFiles,
+  claimAndWriteRecord,
+  slugify,
+  findRecordPath,
+  splitList,
+  resolveBody,
+  formatValidationError,
+  confirmRecord,
+} from './records-io.js';
+import decomposeCommand from './decompose.js';
+import taskVerifyCommand from './task-verify.js';
+import taskRepairCommand from './task-repair.js';
+import taskReadyCommand from './task-ready.js';
+import phaseCheckCommand from './phase-check.js';
+import workflowDocsCommand from './workflow-docs.js';
+
+/** T24: shared `confirm <id>` action for req/decision — draft -> accepted, "a human confirms before it counts as authoritative". */
+function makeConfirmCommand(kind: 'requirement' | 'decision'): Command {
+  return {
+    name: 'confirm',
+    description: `Promote a draft ${kind} to accepted (T24) — the human-confirmation step an inferred proposal needs before it can satisfy a phase gate`,
+    options: [{ name: 'id', description: `${kind} id`, type: 'string' }],
+    action: async (ctx: CommandContext): Promise<CommandResult> => {
+      const id = ctx.args[0] || (ctx.flags.id as string);
+      if (!id) {
+        output.printError(`Usage: ruflo record ${kind === 'requirement' ? 'req' : 'decision'} confirm <id>`);
+        return { success: false, exitCode: 1 };
+      }
+      const result = confirmRecord(ctx, kind, id);
+      if (!result.ok) {
+        output.printError(`Refusing to confirm ${id}`, result.error);
+        return { success: false, exitCode: 1 };
+      }
+      output.printSuccess(`${id} confirmed: draft -> accepted`);
+      return { success: true, data: { id, filePath: result.filePath } };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Requirement
+// ---------------------------------------------------------------------------
+
+const reqNewCommand: Command = {
+  name: 'new',
+  description: 'Create a new requirement record',
+  options: [
+    { name: 'title', description: 'Requirement title', type: 'string', required: true },
+    // Review #3, Important 1: deliberately NO --status option — a real
+    // exploit found and verified end to end ("the citation gate is
+    // self-serviceable"): `req new --status=accepted` let a brand-new
+    // requirement satisfy T16's citation-acceptance gate with zero
+    // review. Same fix T19 already applied to `task new --status`, for
+    // the identical reason — creation always starts `draft`, full stop;
+    // `accepted` is only earned through `req confirm` (T24).
+    { name: 'body', description: 'Markdown body text', type: 'string' },
+    { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
+    { name: 'supersedes', description: 'Comma-separated requirement ids this supersedes', type: 'string' },
+    { name: 'provenance', description: 'human|agent-inferred', type: 'string', default: 'human' },
+    { name: 'confidence', description: 'T24: 0-1, how much real evidence backed an inferred proposal (omit for a human-authored record)', type: 'number' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const title = ctx.flags.title as string | undefined;
+    if (!title) {
+      output.printError('Missing required --title');
+      return { success: false, exitCode: 1 };
+    }
+    const dir = kindDir(ctx, 'requirement');
+    ensureDir(dir);
+    const body = resolveBody(ctx, title);
+    const now = new Date().toISOString();
+    const slug = slugify(title);
+    const confidence = ctx.flags.confidence as number | undefined;
+
+    const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.requirement, slug, (id) => {
+      // Important 5, review #3: contentHash now covers the whole
+      // frontmatter, not just the body — build every other field first,
+      // hash THAT (contentHash is excluded from its own input), then add it.
+      const fields = {
+        id,
+        title,
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+        citations: [],
+        provenance: (ctx.flags.provenance as string) ?? 'human',
+        supersedes: splitList(ctx.flags.supersedes),
+        ...(confidence !== undefined ? { confidence } : {}),
+      };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
+      const result = validateRecord(frontmatter, body);
+      if (!result.success) return { error: formatValidationError(result.error) };
+      return { content: serializeRecordFile(frontmatter, body) };
+    });
+    if ('error' in claimed) {
+      output.printError('Refusing to create requirement', claimed.error);
+      return { success: false, exitCode: 1 };
+    }
+    output.printSuccess(`Created ${claimed.id}: ${claimed.filePath}`);
+    return { success: true, data: { id: claimed.id, path: claimed.filePath } };
+  },
+};
+
+const reqShowCommand: Command = {
+  name: 'show',
+  description: 'Show a requirement record',
+  options: [{ name: 'id', description: 'Requirement id', type: 'string' }],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const id = ctx.args[0] || (ctx.flags.id as string);
+    if (!id) {
+      output.printError('Usage: ruflo record req show <id>');
+      return { success: false, exitCode: 1 };
+    }
+    return showRecord(ctx, 'requirement', id);
+  },
+};
+
+const reqListCommand: Command = {
+  name: 'list',
+  description: 'List requirement records',
+  options: [],
+  action: async (ctx: CommandContext): Promise<CommandResult> => listRecords(ctx, 'requirement'),
+};
+
+const reqConfirmCommand = makeConfirmCommand('requirement');
+
+const reqCommand: Command = {
+  name: 'req',
+  description: 'Requirement records — the "why" (T3/T4, agentic SDLC plan)',
+  subcommands: [reqNewCommand, reqShowCommand, reqListCommand, reqConfirmCommand, decomposeCommand],
+  action: reqListCommand.action,
+};
+
+// ---------------------------------------------------------------------------
+// Decision
+// ---------------------------------------------------------------------------
+
+const decisionNewCommand: Command = {
+  name: 'new',
+  description: 'Create a new decision record',
+  options: [
+    { name: 'title', description: 'Decision title', type: 'string', required: true },
+    // Review #3, Important 1: no --status here either — same reasoning as reqNewCommand above.
+    { name: 'body', description: 'Markdown body text', type: 'string' },
+    { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
+    { name: 'citations', description: 'Comma-separated ids this decision cites (optional)', type: 'string' },
+    { name: 'supersedes', description: 'Comma-separated decision ids this supersedes', type: 'string' },
+    { name: 'related', description: 'Comma-separated related record ids', type: 'string' },
+    { name: 'provenance', description: 'human|agent-inferred', type: 'string', default: 'human' },
+    { name: 'confidence', description: 'T24: 0-1, how much real evidence backed an inferred proposal (omit for a human-authored record)', type: 'number' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const title = ctx.flags.title as string | undefined;
+    if (!title) {
+      output.printError('Missing required --title');
+      return { success: false, exitCode: 1 };
+    }
+    const dir = kindDir(ctx, 'decision');
+    ensureDir(dir);
+    const body = resolveBody(ctx, title);
+    const now = new Date().toISOString();
+    const slug = slugify(title);
+    const confidence = ctx.flags.confidence as number | undefined;
+
+    const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.decision, slug, (id) => {
+      const fields = {
+        id,
+        title,
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+        citations: splitList(ctx.flags.citations),
+        provenance: (ctx.flags.provenance as string) ?? 'human',
+        supersedes: splitList(ctx.flags.supersedes),
+        related: splitList(ctx.flags.related),
+        ...(confidence !== undefined ? { confidence } : {}),
+      };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
+      const result = validateRecord(frontmatter, body);
+      if (!result.success) return { error: formatValidationError(result.error) };
+      return { content: serializeRecordFile(frontmatter, body) };
+    });
+    if ('error' in claimed) {
+      output.printError('Refusing to create decision', claimed.error);
+      return { success: false, exitCode: 1 };
+    }
+    output.printSuccess(`Created ${claimed.id}: ${claimed.filePath}`);
+    return { success: true, data: { id: claimed.id, path: claimed.filePath } };
+  },
+};
+
+const decisionShowCommand: Command = {
+  name: 'show',
+  description: 'Show a decision record',
+  options: [{ name: 'id', description: 'Decision id', type: 'string' }],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const id = ctx.args[0] || (ctx.flags.id as string);
+    if (!id) {
+      output.printError('Usage: ruflo record decision show <id>');
+      return { success: false, exitCode: 1 };
+    }
+    return showRecord(ctx, 'decision', id);
+  },
+};
+
+const decisionListCommand: Command = {
+  name: 'list',
+  description: 'List decision records',
+  options: [],
+  action: async (ctx: CommandContext): Promise<CommandResult> => listRecords(ctx, 'decision'),
+};
+
+const decisionConfirmCommand = makeConfirmCommand('decision');
+
+const decisionCommand: Command = {
+  name: 'decision',
+  description: 'Decision records — the "how it was decided" (T3/T4, agentic SDLC plan)',
+  subcommands: [decisionNewCommand, decisionShowCommand, decisionListCommand, decisionConfirmCommand],
+  action: decisionListCommand.action,
+};
+
+// ---------------------------------------------------------------------------
+// Task (planning record — distinct from the runtime `ruflo task` command)
+// ---------------------------------------------------------------------------
+
+const taskNewCommand: Command = {
+  name: 'new',
+  description: 'Create a new task record',
+  options: [
+    { name: 'title', description: 'Task title', type: 'string', required: true },
+    // Not `required: true` — that triggers the parser's generic "Required
+    // option missing" refusal before this command's own action runs,
+    // pre-empting the more useful citation-contract message below.
+    { name: 'citations', description: 'Comma-separated ids — must include at least one requirement or decision', type: 'string' },
+    { name: 'priority', description: 'p0|p1|p2', type: 'string', default: 'p2' },
+    // Deliberately NO --status option (T19, review-2026-09-21.md's
+    // acceptance criterion "the agent has no API to set Done directly"):
+    // a real bug found via live testing — `--status=done` (equals syntax)
+    // let a brand-new task be created already "done", bypassing
+    // verification entirely. A new task always starts `drafted`, full
+    // stop; every other state is only earned through `record task verify`
+    // (T19) or the future gate (T16), never asserted at creation.
+    { name: 'depends-on', description: 'Comma-separated task ids that must complete first', type: 'string' },
+    { name: 'body', description: 'Markdown body text', type: 'string' },
+    { name: 'body-file', description: 'Read the markdown body from a file', type: 'string' },
+    { name: 'provenance', description: 'human|agent-inferred', type: 'string', default: 'human' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const title = ctx.flags.title as string | undefined;
+    if (!title) {
+      output.printError('Missing required --title');
+      return { success: false, exitCode: 1 };
+    }
+    const citations = splitList(ctx.flags.citations);
+    // The citation contract (plan.md Task 3/4): refuse before writing
+    // anything, naming exactly what's missing.
+    if (citations.length === 0) {
+      output.printError(
+        'Refusing to create a task with no citations',
+        'A task must cite at least one requirement or decision. Pass --citations REQ-001[,DEC-002,...]',
+      );
+      return { success: false, exitCode: 1 };
+    }
+
+    const dir = kindDir(ctx, 'task');
+    ensureDir(dir);
+    const body = resolveBody(ctx, title);
+    const now = new Date().toISOString();
+    const slug = slugify(title);
+
+    const claimed = claimAndWriteRecord(dir, RECORD_PREFIXES.task, slug, (id) => {
+      const fields = {
+        id,
+        title,
+        status: 'drafted',
+        priority: (ctx.flags.priority as string) ?? 'p2',
+        createdAt: now,
+        updatedAt: now,
+        citations,
+        dependsOn: splitList(ctx.flags['depends-on'] ?? ctx.flags.dependsOn),
+        provenance: (ctx.flags.provenance as string) ?? 'human',
+      };
+      const frontmatter = { ...fields, contentHash: computeContentHash(fields, body) };
+      const result = validateRecord(frontmatter, body);
+      if (!result.success) return { error: formatValidationError(result.error) };
+      return { content: serializeRecordFile(frontmatter, body) };
+    });
+    if ('error' in claimed) {
+      output.printError('Refusing to create task', claimed.error);
+      return { success: false, exitCode: 1 };
+    }
+    output.printSuccess(`Created ${claimed.id}: ${claimed.filePath}`);
+    return { success: true, data: { id: claimed.id, path: claimed.filePath } };
+  },
+};
+
+const taskShowCommand: Command = {
+  name: 'show',
+  description: 'Show a task record',
+  options: [{ name: 'id', description: 'Task record id', type: 'string' }],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const id = ctx.args[0] || (ctx.flags.id as string);
+    if (!id) {
+      output.printError('Usage: ruflo record task show <id>');
+      return { success: false, exitCode: 1 };
+    }
+    return showRecord(ctx, 'task', id);
+  },
+};
+
+const taskListCommand: Command = {
+  name: 'list',
+  description: 'List task records',
+  options: [],
+  action: async (ctx: CommandContext): Promise<CommandResult> => listRecords(ctx, 'task'),
+};
+
+const recordTaskCommand: Command = {
+  name: 'task',
+  description: 'Task records — the "what work" (T3/T4, agentic SDLC plan). Not to be confused with `ruflo task`, the swarm/agent runtime task command.',
+  subcommands: [taskNewCommand, taskShowCommand, taskListCommand, taskReadyCommand, taskVerifyCommand, taskRepairCommand],
+  action: taskListCommand.action,
+};
+
+// ---------------------------------------------------------------------------
+// Shared show/list implementations
+// ---------------------------------------------------------------------------
+
+async function showRecord(ctx: CommandContext, kind: RecordKind, id: string): Promise<CommandResult> {
+  const dir = kindDir(ctx, kind);
+  const filePath = findRecordPath(dir, id);
+  if (!filePath) {
+    output.printError(`No ${kind} found matching id "${id}" in ${dir}`);
+    return { success: false, exitCode: 1 };
+  }
+  const raw = readFileSync(filePath, 'utf8');
+  const { frontmatter, body, parseError } = parseRecordFile(raw);
+
+  output.writeln(output.bold(filePath));
+  if (parseError) {
+    output.printWarning(`This record's frontmatter is not valid YAML: ${parseError.message}`);
+    return { success: true, data: { path: filePath, frontmatter, valid: false } };
+  }
+
+  // Pass body too (not just frontmatter) so this also catches content-hash
+  // drift (review-2026-09-21.md, Important 4) — a hand-edited body whose
+  // contentHash was never updated.
+  const result = validateRecord(frontmatter, body);
+  output.printJson(frontmatter);
+  output.writeln('');
+  output.writeln(body.trim());
+  if (!result.success) {
+    output.printWarning(`This record does not currently validate: ${formatValidationError(result.error)}`);
+  }
+  return { success: true, data: { path: filePath, frontmatter, valid: result.success } };
+}
+
+async function listRecords(ctx: CommandContext, kind: RecordKind): Promise<CommandResult> {
+  const dir = kindDir(ctx, kind);
+  const files = listRecordFiles(dir);
+  if (files.length === 0) {
+    output.writeln(`No ${kind} records found in ${dir}`);
+    return { success: true, data: { count: 0, records: [] } };
+  }
+  const records = files.map((f) => {
+    const raw = readFileSync(join(dir, f), 'utf8');
+    const { frontmatter, parseError } = parseRecordFile(raw);
+    if (parseError) {
+      return { id: '?', status: 'INVALID', title: `${f}: not valid YAML — run \`ruflo record validate\`` };
+    }
+    return {
+      id: String(frontmatter.id ?? '?'),
+      status: String(frontmatter.status ?? '?'),
+      title: String(frontmatter.title ?? '?'),
+    };
+  });
+  output.printTable({
+    columns: [
+      { key: 'id', header: 'ID' },
+      { key: 'status', header: 'Status' },
+      { key: 'title', header: 'Title' },
+    ],
+    data: records,
+  });
+  return { success: true, data: { count: records.length, records } };
+}
+
+// ---------------------------------------------------------------------------
+// validate — the whole record set
+// ---------------------------------------------------------------------------
+
+const validateCommand: Command = {
+  name: 'validate',
+  description: 'Validate every requirement, decision, and task record against its schema',
+  options: [
+    {
+      name: 'fix',
+      type: 'boolean',
+      description: 'Recompute and rewrite contentHash for records that fail ONLY a hash mismatch (e.g. after a hand edit). Does not touch records with other schema violations.',
+    },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const fix = !!ctx.flags.fix;
+    const kinds: RecordKind[] = ['requirement', 'decision', 'task'];
+    let total = 0;
+    const failures: Array<{ path: string; error: string }> = [];
+    const fixed: string[] = [];
+    const clearedVerification: string[] = [];
+
+    for (const kind of kinds) {
+      const dir = kindDir(ctx, kind);
+      for (const f of listRecordFiles(dir)) {
+        total++;
+        const filePath = join(dir, f);
+        const raw = readFileSync(filePath, 'utf8');
+        const result = validateRecordFile(raw);
+        if (result.success) continue;
+
+        // B3, review-2026-09-22.md: the hash gate (Important 4) made a hand-
+        // edited body permanently unfixable from the CLI — only a manual
+        // SHA-256 recompute could repair it. --fix closes that gap, but only
+        // for a PURE hash mismatch: a genuine schema violation (bad status,
+        // missing citations, ...) is a real content problem, not a stale
+        // hash, and auto-"fixing" it would mean silently rewriting the
+        // author's data to make a validator happy — never do that.
+        if (fix && result.error instanceof ContentHashMismatchError) {
+          const { frontmatter, body } = parseRecordFile(raw);
+          // Important 5, review #3: a stale record hash means whatever this
+          // record's `verification` receipt (C1) certified — a specific
+          // body, under a specific hash scheme — no longer matches what's
+          // on disk now, whether the cause is an ordinary hand-edit or
+          // (the migration case this fix itself introduces) contentHash
+          // starting to cover the whole frontmatter. Clearing it converts
+          // "a receipt that silently no longer means what it claims" into
+          // "no receipt, needs re-verification" — the SAME state
+          // phase-check already reports clearly, not a confusing
+          // false-positive that reads as tampering.
+          if (frontmatter.verification !== undefined) {
+            delete frontmatter.verification;
+            clearedVerification.push(filePath);
+          }
+          frontmatter.contentHash = computeContentHash(frontmatter, body);
+          const rewritten = serializeRecordFile(frontmatter, body);
+          const revalidated = validateRecordFile(rewritten);
+          if (revalidated.success) {
+            writeFileSync(filePath, rewritten, 'utf8');
+            fixed.push(filePath);
+            continue;
+          }
+          // Rehashing alone didn't make it valid — something else is also
+          // wrong; fall through and report the (re-checked) failure.
+          failures.push({ path: filePath, error: formatValidationError(revalidated.error) });
+          continue;
+        }
+
+        failures.push({ path: filePath, error: formatValidationError(result.error) });
+      }
+    }
+
+    if (fixed.length > 0) {
+      output.printSuccess(`Rehashed ${fixed.length} record(s):`);
+      for (const p of fixed) output.writeln(`  ${p}`);
+    }
+    if (clearedVerification.length > 0) {
+      output.printWarning(`Cleared a stale verification receipt on ${clearedVerification.length} record(s) — the body or frontmatter it certified no longer matches, so it needs re-verification:`);
+      for (const p of clearedVerification) output.writeln(`  ${p}`);
+    }
+
+    if (failures.length > 0) {
+      output.printError(`${failures.length}/${total} record(s) failed validation`);
+      for (const f of failures) {
+        output.writeln(`  ${f.path}`);
+        output.writeln(`    ${f.error}`);
+      }
+      return { success: false, exitCode: 1, data: { total, invalid: failures.length, failures, fixed, clearedVerification } };
+    }
+
+    output.printSuccess(`All ${total} record(s) valid.`);
+    return { success: true, data: { total, invalid: 0, fixed, clearedVerification } };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Top level
+// ---------------------------------------------------------------------------
+
+export const recordCommand: Command = {
+  name: 'record',
+  description: 'Typed record substrate — requirement, decision, task (T3/T4, agentic SDLC plan)',
+  subcommands: [reqCommand, decisionCommand, recordTaskCommand, validateCommand, phaseCheckCommand, workflowDocsCommand],
+  examples: [
+    { command: 'ruflo record req new --title "Quote a feature before building it"', description: 'Create a requirement' },
+    { command: 'ruflo record task new --title "Fix pricing bugs" --citations REQ-001 --priority p1', description: 'Create a task citing a requirement' },
+    { command: 'ruflo record req list', description: 'List all requirements' },
+    { command: 'ruflo record validate', description: 'Validate every record against its schema' },
+  ],
+  action: async (): Promise<CommandResult> => {
+    output.writeln('Usage: ruflo record <req|decision|task|validate> ...');
+    return { success: true };
+  },
+};
+
+export default recordCommand;

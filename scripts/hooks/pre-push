@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+/**
+ * pre-push — placeholder (T5, agentic SDLC plan).
+ *
+ * T5's description calls for "a pre-push hook placeholder that will later
+ * run tests" — that's T19/T20's job (test-gated done: the engine runs the
+ * project's own test command and derives status from the result). Nothing
+ * to enforce yet; this exists so the install script has a stable file to
+ * copy into `.git/hooks/pre-push` now, rather than T19/T20 needing to wire
+ * hook installation from scratch later.
+ */
+
+process.exit(0);

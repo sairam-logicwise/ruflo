@@ -13,6 +13,7 @@
  */
 import { IoTCognitumPlugin } from '../../dist/plugin.js';
 import { readFileSync, existsSync } from 'node:fs';
+import { Agent } from 'undici';
 import { resolve } from 'node:path';
 
 // Load .env from CWD (or walk up) so COGNITUM_SEED_TOKEN is available.
@@ -49,10 +50,14 @@ console.log(`[smoke] env: ${envFile ?? '(none)'}`);
 console.log(`[smoke] endpoint: ${SEED_ENDPOINT}`);
 console.log(`[smoke] bearer token: ${SEED_TOKEN ? 'loaded' : 'absent'}`);
 
-// Self-signed cert tolerance for pair-window fetch (https port uses dev cert).
-if (SEED_ENDPOINT.startsWith('https://')) {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-}
+// Self-signed cert tolerance for pair-window fetch (https port uses dev
+// cert). Scoped to a dispatcher used only for calls to SEED_ENDPOINT below —
+// never a global NODE_TLS_REJECT_UNAUTHORIZED override, which would also
+// silently disable cert checking for every other HTTPS call this process
+// makes (CodeQL js/disabling-certificate-validation).
+const seedDispatcher = SEED_ENDPOINT.startsWith('https://')
+  ? new Agent({ connect: { rejectUnauthorized: false } })
+  : undefined;
 
 const plugin = new IoTCognitumPlugin();
 const noop = () => undefined;
@@ -196,6 +201,7 @@ await run('open pair window (90s)', async () => {
   // Check first — avoid 429 if window is already open
   const statusResp = await fetch(`${SEED_ENDPOINT}/api/v1/pair/status`, {
     headers: SEED_TOKEN ? { authorization: `Bearer ${SEED_TOKEN}` } : {},
+    dispatcher: seedDispatcher,
   });
   if (statusResp.ok) {
     const s = await statusResp.json();
@@ -211,6 +217,7 @@ await run('open pair window (90s)', async () => {
       ...(SEED_TOKEN ? { authorization: `Bearer ${SEED_TOKEN}` } : {}),
     },
     body: JSON.stringify({ duration_secs: 90 }),
+    dispatcher: seedDispatcher,
   });
   if (!resp.ok) throw new Error(`open window: HTTP ${resp.status}`);
 });

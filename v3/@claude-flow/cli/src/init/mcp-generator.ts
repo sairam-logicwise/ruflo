@@ -94,6 +94,21 @@ export function generateMCPConfig(options: InitOptions): object {
     );
   }
 
+  // Graphify MCP server (T1, agentic SDLC plan) — local code-graph queries
+  // over graphify-out/graph.json. Zero token cost, no auth. Unlike the
+  // servers above this is a Python module (`pip install graphifyy`), not an
+  // npx-fetched Node package, so it gets its own entry shape rather than
+  // createMCPServerEntry(). Marked optional: a fresh clone with no Python
+  // graphify install shouldn't break every other MCP server in the file.
+  if (config.graphify) {
+    mcpServers['graphify'] = {
+      command: isWindows() ? 'python' : 'python3',
+      args: ['-m', 'graphify.serve', 'graphify-out/graph.json'],
+      env: {},
+      optional: true,
+    };
+  }
+
   return { mcpServers };
 }
 
@@ -123,6 +138,9 @@ export function generateMCPCommands(options: InitOptions): string[] {
     if (config.flowNexus) {
       commands.push('claude mcp add flow-nexus -- cmd /c npx -y flow-nexus@latest mcp start');
     }
+    if (config.graphify) {
+      commands.push('claude mcp add graphify -- cmd /c python -m graphify.serve graphify-out/graph.json');
+    }
   } else {
     if (config.claudeFlow) {
       // #2206: registration name must be `claude-flow` to match mcp__claude-flow__* plugin tool references
@@ -133,6 +151,9 @@ export function generateMCPCommands(options: InitOptions): string[] {
     }
     if (config.flowNexus) {
       commands.push("claude mcp add flow-nexus -- npx -y flow-nexus@latest mcp start");
+    }
+    if (config.graphify) {
+      commands.push("claude mcp add graphify -- python3 -m graphify.serve graphify-out/graph.json");
     }
   }
 

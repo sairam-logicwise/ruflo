@@ -27,6 +27,7 @@ function makeMCPOptions(overrides: Partial<InitOptions> = {}): InitOptions {
       claudeFlow: true,
       ruvSwarm: false,
       flowNexus: false,
+      graphify: false,
       autoStart: false,
       port: 3000,
     },

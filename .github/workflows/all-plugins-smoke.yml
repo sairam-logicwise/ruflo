@@ -27,6 +27,9 @@ on:
       - '.github/workflows/all-plugins-smoke.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   smoke-all:
     runs-on: ubuntu-latest

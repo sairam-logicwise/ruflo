@@ -37,6 +37,9 @@ on:
       - '.github/workflows/metaharness-ci.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   score:
     runs-on: ubuntu-latest

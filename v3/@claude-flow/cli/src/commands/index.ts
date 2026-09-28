@@ -99,10 +99,27 @@ const commandLoaders: Record<string, CommandLoader> = {
   spinner: () => import('./spinner.js'),
   // Ruflo entries in Claude Code's companyAnnouncements startup rotation (ADR-319)
   announcements: () => import('./announcements.js'),
+  // Typed record substrate — requirement/decision/task (T3/T4, agentic SDLC
+  // plan). Nested `record` to avoid colliding with the existing `task`
+  // command (swarm/agent runtime task orchestration — a different concept).
+  record: () => import('./records.js'),
+  // Mechanical backfill pass — structure/deps/entry-points/test-presence
+  // per area, from the Graphify graph alone, no model calls (T23,
+  // agentic SDLC plan).
+  backfill: () => import('./backfill.js'),
   // AGNTCY/Outshift runtime transport selection (ADR-324 §2) — optional,
   // removable augmentation; no-ops to local transport when AGNTCY/SLIM is
   // not configured (RUFLO_AGNTCY_SLIM_ENDPOINT unset).
   transport: () => import('./agntcy/transport.js'),
+  // The autonomy loop (T25, agentic SDLC plan) — advances task records
+  // through T19's verify and T20's repair until a pass makes no progress.
+  run: () => import('./run.js'),
+  // Roll estimates up across a requirement's decomposed tasks and price
+  // them (T11, agentic SDLC plan) — a range with a confidence level.
+  quote: () => import('./quote.js'),
+  // Quoted versus actual across delivered tasks (T14, agentic SDLC plan) —
+  // hit rate and trend over time.
+  variance: () => import('./variance.js'),
 };
 
 // Cache for loaded commands

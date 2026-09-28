@@ -35,6 +35,9 @@ env:
   DEFAULT_TIMEOUT: 300000
   INTEGRATION_DB_PATH: './integration-test.db'
 
+permissions:
+  contents: read
+
 jobs:
   # Setup integration test environment
   integration-setup:
@@ -695,6 +698,9 @@ jobs:
       - test-fault-tolerance
       - test-performance-integration
     if: always()
+    permissions:
+      contents: read
+      pull-requests: write  # posts the results comment on the triggering PR
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

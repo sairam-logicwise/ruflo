@@ -31,6 +31,9 @@ on:
       - '.github/workflows/no-metaharness-smoke.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   smoke-without-metaharness:
     runs-on: ubuntu-latest
