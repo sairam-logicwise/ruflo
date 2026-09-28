@@ -515,9 +515,15 @@ function sanitizeString(value: string | undefined | null, maxLength: number): st
 function sanitizePath(value: string): string {
   let result = sanitizeString(value, 256);
 
-  // Remove path traversal sequences
-  result = result.replace(/\.\.\//g, '');
-  result = result.replace(/\.\.\\/g, '');
+  // Remove path traversal sequences. Loop to a fixed point: a single pass
+  // can leave a new "../" behind when sequences overlap/nest, e.g. stripping
+  // "../" once from "....//" leaves "../" (chars either side of the removed
+  // match rejoin into a fresh traversal token).
+  let previous: string;
+  do {
+    previous = result;
+    result = result.replace(/\.\.\//g, '').replace(/\.\.\\/g, '');
+  } while (result !== previous);
 
   // Remove leading slashes that could be absolute paths
   result = result.replace(/^[\/\\]+/, '');

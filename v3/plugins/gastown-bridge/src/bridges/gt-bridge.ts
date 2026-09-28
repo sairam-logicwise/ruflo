@@ -26,6 +26,33 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Extract the first top-level JSON object/array span from arbitrary text,
+ * in linear time. Replaces a `/\{[\s\S]*\}|\[[\s\S]*\]/` style regex, which
+ * is polynomial-time on adversarial input (many `{`/`[` with no matching
+ * close forces the engine to retry the greedy scan from every start index).
+ */
+function extractJsonSpan(text: string): string | null {
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+
+  const objSpan =
+    firstBrace !== -1 && lastBrace > firstBrace
+      ? { start: firstBrace, text: text.slice(firstBrace, lastBrace + 1) }
+      : null;
+  const arrSpan =
+    firstBracket !== -1 && lastBracket > firstBracket
+      ? { start: firstBracket, text: text.slice(firstBracket, lastBracket + 1) }
+      : null;
+
+  if (objSpan && arrSpan) {
+    return objSpan.start <= arrSpan.start ? objSpan.text : arrSpan.text;
+  }
+  return (objSpan ?? arrSpan)?.text ?? null;
+}
+
 // ============================================================================
 // Performance Caches
 // ============================================================================
@@ -546,10 +573,10 @@ export class GtBridge {
       return parsed;
     } catch {
       // If not JSON, try to extract JSON from output
-      const jsonMatch = output.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
+      const jsonSpan = extractJsonSpan(output);
+      if (jsonSpan) {
         try {
-          const parsed = JSON.parse(jsonMatch[0]) as T;
+          const parsed = JSON.parse(jsonSpan) as T;
           parsedCache.set(cacheKey, parsed);
           return parsed;
         } catch {
