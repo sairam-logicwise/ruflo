@@ -175,7 +175,14 @@ export class ProcessExecutor implements ICommandExecutor {
       return ['claude', '-p', prompt, '--output-format', 'json'];
     }
     // Fallback: split on whitespace (safe for commands without shell metacharacters)
-    return command.replace(/\s*2>\/dev\/null\s*$/, '').split(/\s+/);
+    // Strip a trailing "2>/dev/null" via plain string ops (not regex) to avoid
+    // the O(n^2) backtracking an unanchored `\s*...\s*$` pattern hits on
+    // adversarial whitespace-heavy input.
+    let cleaned = command.trimEnd();
+    if (cleaned.endsWith('2>/dev/null')) {
+      cleaned = cleaned.slice(0, -'2>/dev/null'.length).trimEnd();
+    }
+    return cleaned.split(/\s+/);
   }
 }
 

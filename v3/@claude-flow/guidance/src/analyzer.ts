@@ -1817,7 +1817,11 @@ function getValidationTasks(): ValidationTask[] {
       dimension: 'Completeness',
       prompt: 'What environment variables do I need?',
       assertions: [
-        { type: 'must-match-pattern', value: '[A-Z_]+=', severity: 'major' },
+        // Bounded quantifier: env var names are never remotely this long in
+        // practice, and the bound keeps `new RegExp(...).test(output)` below
+        // linear-time (an unbounded `[A-Z_]+=` backtracks O(n^2) against
+        // adversarial/agent-generated output with a long uppercase run and no `=`).
+        { type: 'must-match-pattern', value: '[A-Z_]{1,64}=', severity: 'major' },
       ],
       weight: 0.5,
     },
