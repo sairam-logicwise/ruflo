@@ -874,6 +874,9 @@ function parseToml(content: string): TomlParseResult {
       if (!result.data[currentSection]) {
         result.data[currentSection] = {};
       }
+      // codeql[js/prototype-polluting-assignment]: both `key` and
+      // `currentSection` are already rejected above via isDangerousKey
+      // (__proto__/constructor/prototype) before this assignment runs.
       (result.data[currentSection] as Record<string, unknown>)[key] = value;
     } else {
       result.data[key] = value;

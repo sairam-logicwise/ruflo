@@ -192,16 +192,28 @@ class MockQESecurityBridge {
     // scheme (e.g. "java\tscript:" still executes). The body span is
     // bounded (not an unbounded [\s\S]*?) so an opening <script> with no
     // matching close anywhere in the input can't force a retry from every
-    // position (polynomial-redos); the loop is bounded to 10 passes for
-    // the same reason — nesting depth could otherwise be made proportional
-    // to input length.
-    const MAX_PASSES = 10;
-    let sanitized = input;
+    // position (polynomial-redos).
+    //
+    // Each pass that changes anything strictly removes at least one
+    // character, so capping the input length bounds how many passes a
+    // fixed point can ever need. Without that cap, a fixed pass count is
+    // either unsafe (too low — adversarial nesting built to need more
+    // passes than the cap survives, CodeQL js/incomplete-multi-character-
+    // sanitization) or itself a ReDoS surface (too high on unbounded
+    // input). 10,000 chars is generous for any realistic fixture.
+    const MAX_INPUT_LENGTH = 10_000;
+    let sanitized = input.slice(0, MAX_INPUT_LENGTH);
+    const MAX_PASSES = MAX_INPUT_LENGTH;
     let previous: string;
     let passes = 0;
     do {
       previous = sanitized;
       sanitized = sanitized
+        // codeql[js/bad-tag-filter]: this strict literal `</script>` close
+        // tag doesn't match a padded variant like `</script >`, but the verb
+        // open-or-close backstop on the very next line (`<\/?script[^>]*>`)
+        // unconditionally removes any remaining `<script...>`/`</script...>`
+        // regardless of padding, so no `<script` text can survive this pass.
         .replace(/<script[^>]*>[\s\S]{0,100000}?<\/script>/gi, '')
         .replace(/<\/?script[^>]*>/gi, '')
         .replace(/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi, '')

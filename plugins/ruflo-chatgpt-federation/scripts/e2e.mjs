@@ -109,9 +109,14 @@ console.log('\noauth discovery');
   // "<scr<script>ipt>") can't survive a single non-overlapping pass.
   // Bounded span + pass count for the same reason as the production
   // sanitizers this mirrors (polynomial-redos on an unclosed tag / nesting
-  // depth proportional to input length).
-  const MAX_PASSES = 10;
-  let stripped = html;
+  // depth proportional to input length). Each pass that changes anything
+  // strictly removes at least one character, so capping the input length
+  // bounds how many passes a fixed point can ever need — a fixed low pass
+  // count without that cap can let a tag survive adversarial nesting built
+  // to need more passes (CodeQL js/incomplete-multi-character-sanitization).
+  const MAX_INPUT_LENGTH = 100_000;
+  let stripped = html.slice(0, MAX_INPUT_LENGTH);
+  const MAX_PASSES = MAX_INPUT_LENGTH;
   let prevStripped;
   let passes = 0;
   do {

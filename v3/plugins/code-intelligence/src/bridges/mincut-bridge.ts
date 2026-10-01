@@ -575,6 +575,10 @@ export class MinCutBridge implements IMinCutBridge {
         const from = path[i];
         const to = path[i + 1];
         if (isSafeIndex(from) && isSafeIndex(to)) {
+          // codeql[js/prototype-polluting-assignment]: `residual` is a
+          // number[][] (array of arrays), and isSafeIndex guarantees `from`/
+          // `to` are in-bounds integers, so these are plain numeric array
+          // writes — there is no string key path to __proto__/constructor.
           residual[from]![to] = (residual[from]?.[to] ?? 0) - minCap;
           residual[to]![from] = (residual[to]?.[from] ?? 0) + minCap;
         }

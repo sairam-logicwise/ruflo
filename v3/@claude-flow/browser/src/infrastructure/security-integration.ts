@@ -338,7 +338,17 @@ export class BrowserSecurityScanner {
     );
 
     // Remove event handlers. Looped to a fixed point for the same reason.
-    sanitized = replaceToFixedPoint(sanitized, /\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+    // Bounded quantifiers (`{0,N}`/`{1,N}` instead of `\s*`/`\w+`): when no
+    // `=` follows a run of whitespace or word characters, an unbounded `\s*`
+    // or `\w+` forces the engine to retry the match starting at every
+    // position in that run before giving up — O(n) positions × O(n) retry
+    // each (js/polynomial-redos). No real attribute name or quoted value
+    // needs more than these bounds.
+    sanitized = replaceToFixedPoint(
+      sanitized,
+      /\s{0,20}on\w{1,32}\s{0,20}=\s{0,20}["'][^"']{0,10000}["']/gi,
+      ''
+    );
 
     return sanitized;
   }

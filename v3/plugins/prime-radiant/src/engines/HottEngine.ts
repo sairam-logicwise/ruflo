@@ -452,6 +452,9 @@ export class HottEngine implements IHottEngine {
     // split between them (polynomial blowup). Requiring the group to start
     // on a non-whitespace char removes the ambiguity: `\s*` always consumes
     // the run of whitespace, leaving one unambiguous parse.
+    // codeql[js/polynomial-redos]: the `[^\s)]` first character requirement
+    // above already removes the overlap between `\s*` and the second group
+    // (see the comment above) — there is no remaining ambiguous split point.
     normalized = normalized.replace(/trans\(refl\(([^)]+)\),\s*([^\s)][^)]*)\)/g, '$2');
     normalized = normalized.replace(/trans\(([^)]+),\s*refl\(([^)]+)\)\)/g, '$1');
 

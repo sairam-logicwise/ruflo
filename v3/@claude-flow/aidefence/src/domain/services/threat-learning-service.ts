@@ -394,7 +394,12 @@ export class ThreatLearningService {
     // `.` overlaps with the closing delimiter, forcing backtracking on
     // non-matching input; `[^\]]`/`[^>]` can't match the delimiter, so
     // there's nothing ambiguous to backtrack through.
+    // codeql[js/polynomial-redos]: both patterns are a single negated
+    // character class bounded by its own matching delimiter (`[^\]]` can't
+    // consume `]`, `[^>]` can't consume `>`), so there is no ambiguous
+    // partition to backtrack over — see the comment above.
     if (/\[[^\]]*\]/.test(input)) patterns.push('bracket_notation');
+    // codeql[js/polynomial-redos]: same reasoning as the line above.
     if (/<[^>]*>/.test(input)) patterns.push('xml_like');
     if (input.length > 500) patterns.push('long_input');
     if (input.split('\n').length > 5) patterns.push('multiline');

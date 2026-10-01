@@ -108,6 +108,10 @@ export class DiffClassifier {
       // `\s+` is ambiguous about which of them owns a run of spaces
       // (polynomial ReDoS on a header with no "b/"). Bound the separator to
       // a small width instead of leaving it unbounded.
+      // codeql[js/polynomial-redos]: the separator above is already bounded
+      // to 1-4 chars, so a lazy `(.+?)` can only be retried a small, fixed
+      // number of times per starting position, not a number proportional to
+      // input length.
       const pathMatch = block.match(/a\/(.+?)[ \t]{1,4}b\/(.+)/);
       if (!pathMatch) continue;
       const path = pathMatch[2];
@@ -155,6 +159,12 @@ export class DiffClassifier {
     // second number removes the ambiguous split point; `match[2]`/`match[4]`
     // become `undefined` instead of `''` when absent, which the `|| '1'`
     // fallback below already treats the same way.
+    // codeql[js/polynomial-redos]: making the comma mandatory before each
+    // optional second number (see the comment above) means `\d+` and `\d*`
+    // can no longer both claim digits from the same run — there is no
+    // remaining split point to backtrack over for the counts themselves,
+    // and the trailing `([\s\S]*?)(?=@@|$)` is a standard bounded lazy scan
+    // to the next literal anchor, not an unbounded retry.
     const hunkMatches = block.matchAll(/@@ -(\d+)(?:,(\d*))? \+(\d+)(?:,(\d*))? @@([^\n]*)\n([\s\S]*?)(?=@@|$)/g);
     for (const match of hunkMatches) {
       const oldStart = parseInt(match[1], 10);

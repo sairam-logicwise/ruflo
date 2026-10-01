@@ -451,6 +451,13 @@ export function createGateway({ relay, keyFile, port, registration } = {}) {
       if (rateLimited(req)) return res.writeHead(429, { 'content-type': 'application/json' }).end('{"error":"rate limited"}');
       const auth = await oauthContext(req);
       try {
+        // codeql[js/insufficient-password-hash]: auth.subject is a validated
+        // OAuth subject claim, not a password — this HMAC truncation exists
+        // only to produce a short, non-reversible, log-correlatable
+        // pseudonym so raw subject IDs never hit the log stream. HMAC-SHA256
+        // is the right primitive for that; a slow password KDF would be
+        // wrong here (this runs on every request and needs no resistance to
+        // offline brute force of a low-entropy secret).
         const sub = auth.subject ? createHmac('sha256', LOG_SUBJECT_KEY).update(auth.subject).digest('hex').slice(0, 12) : '-';
         console.log(`mcp path=${url.pathname} auth=${auth.mode} scopes=${(auth.scopes || []).join('+') || '-'} sub=${sub}`
           + (auth.mode === 'denied' ? ` reason=${auth.error} aud=${auth.observedAudience || '-'}` : ''));

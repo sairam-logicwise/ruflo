@@ -288,6 +288,9 @@ export class ASTAnalyzer {
       // ReDoS on a long unclosed `export {`). Drop the outer `\s*`; each
       // name is already `.trim()`-ed below, so the captured whitespace is
       // discarded either way.
+      // codeql[js/polynomial-redos]: `[^}]*` is bounded by the single
+      // literal `}` terminator with no overlapping quantifier beside it —
+      // there is no ambiguous partition for the engine to backtrack over.
       const namedExportMatch = line.match(/export\s*\{([^}]*)\}/);
       if (namedExportMatch) {
         // `\s+as\s+` is unanchored and both sides are unbounded, so a long

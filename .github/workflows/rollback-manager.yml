@@ -423,11 +423,25 @@ jobs:
     runs-on: ubuntu-latest
     needs: [failure-detection, execute-rollback]
     if: needs.execute-rollback.outputs.rollback-executed == 'true'
+    # Least privilege: this job only reads the already-pushed rollback commit
+    # and runs local verification commands — it never writes to the repo,
+    # issues, or packages, so it gets no GITHUB_TOKEN scopes at all.
+    permissions: {}
     steps:
+      # SECURITY: `rollback-commit` is the commit `execute-rollback` already
+      # created and pushed to the repo (git log entries, not attacker-supplied
+      # file content), but CodeQL's actions/cache-poisoning/poisonable-step
+      # query conservatively treats any workflow_dispatch-derived ref as
+      # untrusted. `persist-credentials: false` means the steps below never
+      # hold a repo-write token, and no cache action runs anywhere in this
+      # job (see the Setup Node.js comment below), so there is no path for
+      # code built from this ref to read or poison the default-branch cache
+      # scope.
       - name: Checkout rolled back code
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.execute-rollback.outputs.rollback-commit }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

@@ -583,6 +583,13 @@ export async function authorizeMcpTool(
       approvalIds: Array.isArray(context.approvalIds) ? context.approvalIds.map(String) : undefined,
       evidence: Array.isArray(context.evidence) ? context.evidence as PolicyEvidence[] : undefined,
       metadata: {
+        // codeql[js/insufficient-password-hash]: this is a content-addressable
+        // audit digest of the (already redacted) call input, not a password
+        // hash — redactSensitiveFields() replaces any password/token/secret
+        // field with the literal '[redacted]' before this ever runs, so no
+        // actual credential value reaches createHash. A slow KDF would be
+        // wrong here regardless: this digest must be fast and must change
+        // whenever the non-secret parts of the input change.
         inputDigest: `sha256:${createHash('sha256').update(JSON.stringify(redactSensitiveFields(input))).digest('hex')}`,
       },
     },
