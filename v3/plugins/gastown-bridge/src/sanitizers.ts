@@ -518,12 +518,15 @@ function sanitizePath(value: string): string {
   // Remove path traversal sequences. Loop to a fixed point: a single pass
   // can leave a new "../" behind when sequences overlap/nest, e.g. stripping
   // "../" once from "....//" leaves "../" (chars either side of the removed
-  // match rejoin into a fresh traversal token). Bounded to 10 passes — an
-  // unbounded loop over attacker-controlled input would reintroduce O(n^2)
-  // work via nesting depth proportional to input length, and `value` is
-  // already capped to 256 chars by sanitizeString() above, so 10 passes is
-  // generous for any realistic nesting.
-  const MAX_PASSES = 10;
+  // match rejoin into a fresh traversal token). Each pass that changes
+  // anything strictly removes at least 3 characters ("../" or "..\"), so a
+  // 256-char input (the cap from sanitizeString() above) can need at most
+  // ceil(256/3) ≈ 86 passes to reach a fixed point — a lower cap (the
+  // previous value was 10) can let "../" survive adversarial nesting built
+  // to need more than 10 passes (CodeQL js/incomplete-multi-character-
+  // sanitization). 100 keeps a safety margin while staying trivially cheap
+  // for a string this short.
+  const MAX_PASSES = 100;
   let previous: string;
   let passes = 0;
   do {

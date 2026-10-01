@@ -427,6 +427,12 @@ class JsFallbackWasmLoader implements IWasmLoader {
         }
 
         // Key-value pairs
+        // codeql[js/polynomial-redos]: `\w+` and `\s` are disjoint character
+        // classes, so the first `\s*` can't overlap with the preceding
+        // `(\w+)`; the required literal `=` must be found before the
+        // trailing `\s*(.*)$` is ever reached, and once past `=` nothing
+        // downstream of `(.*)$` can fail and force re-partitioning — there
+        // is no backtracking-inducing failure path for this pattern.
         const kvMatch = trimmed.match(/^(\w+)\s*=\s*(.*)$/);
         if (kvMatch) {
           const key = kvMatch[1];

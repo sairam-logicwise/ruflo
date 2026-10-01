@@ -123,6 +123,9 @@ function setNestedValue(obj: Record<string, unknown>, key: string, value: unknow
   if (DANGEROUS_KEYS.has(finalKey)) {
     throw new Error(`Dangerous key segment rejected: ${finalKey}`);
   }
+  // codeql[js/prototype-pollution-utility]: finalKey (and every earlier path
+  // segment) is already checked against the same __proto__/constructor/
+  // prototype set above and the function throws before reaching here.
   current[finalKey] = value;
 }
 

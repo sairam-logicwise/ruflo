@@ -222,6 +222,9 @@ function setNestedValue(obj: Record<string, unknown>, key: string, value: unknow
     }
     current = current[part] as Record<string, unknown>;
   }
+  // codeql[js/prototype-pollution-utility]: every path segment, including the
+  // final one, is already checked against DANGEROUS_KEYS above and the
+  // function throws before reaching here.
   current[parts[parts.length - 1]] = value;
 }
 

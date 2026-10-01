@@ -19,21 +19,26 @@ const execFileAsync = promisify(execFile);
 // argument escaping intact and avoids both ENOENT and EINVAL.
 const isWindows = process.platform === 'win32';
 
-// cmd.exe expands `%VAR%` sequences while parsing its command line — even
-// inside quoted arguments — regardless of Node's own argv quoting. Any
-// argument containing `%` (an env var name, a config path, a malformed
-// package spec) could get silently substituted with an environment
-// variable's value before npm ever sees it (CodeQL
-// js/shell-command-injection-from-environment). Doubling `%` to `%%` is
-// cmd.exe's own escape for a literal percent, so this closes that off
-// regardless of where the argument originated.
-function escapeCmdPercent(arg: string): string {
-  return arg.replace(/%/g, '%%');
+// `cmd.exe /c` re-parses its ENTIRE received command line with its own
+// grammar, independent of how Node quoted each argv entry when spawning
+// cmd.exe itself. Any argument reaching here unescaped — including a
+// `process.cwd()`-derived plugins directory or a user-supplied package
+// spec — could let `& | ( ) < > ^ "` or `%VAR%` chain additional commands,
+// redirect output, or expand an environment variable before npm ever sees
+// the argument (CodeQL js/shell-command-injection-from-environment). `^` is
+// cmd.exe's own escape character, so it must be doubled first (before any
+// other character gets a new `^` prefix added); `%` is doubled instead,
+// since that is cmd.exe's dedicated escape for a literal percent.
+function escapeCmdArg(arg: string): string {
+  return arg
+    .replace(/\^/g, '^^')
+    .replace(/%/g, '%%')
+    .replace(/[&|()<>"]/g, (ch) => '^' + ch);
 }
 
 function runNpm(args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
   if (isWindows) {
-    return execFileAsync('cmd.exe', ['/d', '/s', '/c', 'npm', ...args.map(escapeCmdPercent)], { timeout: timeoutMs });
+    return execFileAsync('cmd.exe', ['/d', '/s', '/c', 'npm', ...args.map(escapeCmdArg)], { timeout: timeoutMs });
   }
   return execFileAsync('npm', args, { timeout: timeoutMs });
 }

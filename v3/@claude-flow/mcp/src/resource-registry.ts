@@ -379,7 +379,12 @@ export class ResourceRegistry extends EventEmitter {
   private buildTemplatePattern(escapedTemplate: string): string {
     const PLACEHOLDER = '[^/]+';
     return escapedTemplate
-      .replace(/\\\{[^}]+\\\}/g, PLACEHOLDER)
+      // Bounded to 256 chars: an escaped template with many `\{` and no
+      // closing `\}` anywhere would otherwise make `[^}]+` greedily consume
+      // to the end of the string and fail, then retry from the next `\{` —
+      // O(n) remaining length × O(n) starting positions (js/polynomial-redos).
+      // No real placeholder name is anywhere close to 256 characters.
+      .replace(/\\\{[^}]{1,256}\\\}/g, PLACEHOLDER)
       .replace(/(?:\[\^\/\]\+)+/g, (run) => {
         const count = run.length / PLACEHOLDER.length;
         return count > 1 ? `[^/]{${count},}` : run;

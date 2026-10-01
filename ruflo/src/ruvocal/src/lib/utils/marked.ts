@@ -254,7 +254,19 @@ function sanitizeHref(href?: string | null): string | undefined {
 	// returning the original would still let the raw bypass string through.
 	const cleaned = href.replace(/[\u0000-\u001f\u007f]/g, "").trim();
 	const lower = cleaned.toLowerCase();
-	if (lower.startsWith("javascript:") || lower.startsWith("data:text/html")) {
+	// Block every scheme capable of executing script when followed (CodeQL
+	// js/incomplete-url-scheme-check: the previous check only named
+	// javascript: and data:text/html, missing vbscript: entirely and every
+	// other executable data: subtype — data:image/svg+xml can embed <script>,
+	// and a bare "data:" with no explicit media type defaults to text/plain
+	// in some parsers but to text/html in others). Images are the only
+	// legitimate data: use in rendered markdown, so allow-list those instead
+	// of trying to block an open-ended list of dangerous subtypes.
+	if (
+		lower.startsWith("javascript:") ||
+		lower.startsWith("vbscript:") ||
+		(lower.startsWith("data:") && !/^data:image\/(png|jpe?g|gif|webp|bmp|avif);base64,/.test(lower))
+	) {
 		return undefined;
 	}
 	return cleaned.replace(/>$/, "");
