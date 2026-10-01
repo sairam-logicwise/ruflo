@@ -105,7 +105,21 @@ console.log('\noauth discovery');
     code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', code_challenge_method: 'S256',
     scope: 'federation:read federation:publish', state: 'e2e' });
   const html = await (await fetch(`${AS}/oauth/authorize?${q}`)).text().catch(() => '');
-  const text = html.replace(/<(script|style)[\s\S]*?<\/\1>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  // Loop tag-stripping to a fixed point so a malformed/nested tag (e.g.
+  // "<scr<script>ipt>") can't survive a single non-overlapping pass.
+  // Bounded span + pass count for the same reason as the production
+  // sanitizers this mirrors (polynomial-redos on an unclosed tag / nesting
+  // depth proportional to input length).
+  const MAX_PASSES = 10;
+  let stripped = html;
+  let prevStripped;
+  let passes = 0;
+  do {
+    prevStripped = stripped;
+    stripped = stripped.replace(/<(script|style)[\s\S]{0,100000}?<\/\1>/gi, '').replace(/<[^>]+>/g, ' ');
+    passes++;
+  } while (stripped !== prevStripped && passes < MAX_PASSES);
+  const text = stripped.replace(/\s+/g, ' ');
   if (/Unknown client_id/.test(text)) {
     no(`AS knows client_id=${CLIENT_ID}`, 'Unknown client_id — the migration has not reached this database');
   } else if (/is requesting access/i.test(text)) {

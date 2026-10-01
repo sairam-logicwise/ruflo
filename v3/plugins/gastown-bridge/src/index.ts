@@ -491,7 +491,12 @@ class WasmLoaderAdapter implements IWasmLoader {
 
       const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
       if (sectionMatch) {
-        currentSection = sectionMatch[1];
+        const section = sectionMatch[1];
+        if (section === '__proto__' || section === 'constructor' || section === 'prototype') {
+          currentSection = '';
+          continue;
+        }
+        currentSection = section;
         if (!result[currentSection]) result[currentSection] = {};
         continue;
       }
@@ -507,6 +512,10 @@ class WasmLoaderAdapter implements IWasmLoader {
         else if (/^\d+\.\d+$/.test(value as string)) value = parseFloat(value as string);
         else if ((value as string).startsWith('"') && (value as string).endsWith('"')) {
           value = (value as string).slice(1, -1);
+        }
+
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+          continue;
         }
 
         if (currentSection) {

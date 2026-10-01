@@ -95,7 +95,11 @@ export function createPublisherService({ relay, keyPath, port } = {}) {
    *   denied  — a token that did not verify, or none while OAuth is mandatory.
    */
   async function authContext(req) {
-    const bearer = String(req?.headers?.authorization || '').match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+    // `\S` (not `.`) starts the capture group so it can't overlap with the
+    // preceding `\s+`: an ambiguous split point between two adjacent
+    // quantifiers matching overlapping character classes is what causes
+    // catastrophic backtracking (polynomial ReDoS) on crafted header values.
+    const bearer = String(req?.headers?.authorization || '').match(/^Bearer\s+(\S.*)$/i)?.[1]?.trim();
     if (bearer) {
       const v = await verifyAccessToken(bearer, { issuer: OAUTH_ISSUER, jwksUri: OAUTH_JWKS,
         audience: OAUTH_CLIENT_ID || undefined });

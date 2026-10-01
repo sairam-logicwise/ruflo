@@ -193,9 +193,16 @@ export class ASTAnalyzer {
     if (!pattern) return null;
     const match = line.match(pattern);
     if (match) return { name: match[1], params: match[2] || '' };
-    const arrowMatch = line.match(/(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/);
+    // Quantifiers bounded to realistic source-line widths so a pathological
+    // line (e.g. a very long minified line fed into this heuristic
+    // analyzer) can't drive polynomial-time backtracking.
+    const arrowMatch = line.match(/(?:const|let|var)\s{1,10}(\w{1,200})\s{0,10}=\s{0,10}(?:async\s{1,10})?\([^)]{0,2000}\)\s{0,10}=>/);
     if (arrowMatch) return { name: arrowMatch[1], params: '' };
-    const methodMatch = line.match(/^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w+)?\s*\{/);
+    // The trailing `\s*` used to sit outside the optional `(?::\s*\w+)?`
+    // group, so when that group didn't match, two unbounded `\s*` ran back
+    // to back over the same whitespace run (ambiguous split -> polynomial
+    // ReDoS). Moving it inside the group removes the ambiguity.
+    const methodMatch = line.match(/^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w+\s*)?\{/);
     if (methodMatch && methodMatch[1] !== 'if' && methodMatch[1] !== 'while' && methodMatch[1] !== 'for') {
       return { name: methodMatch[1], params: '' };
     }
@@ -276,9 +283,17 @@ export class ASTAnalyzer {
     for (const line of lines) {
       const exportMatch = line.match(/export\s+(?:default\s+)?(?:const|let|var|function|class|interface|type|enum)\s+(\w+)/);
       if (exportMatch) exports.push(exportMatch[1]);
-      const namedExportMatch = line.match(/export\s*\{\s*([^}]+)\s*\}/);
+      // `[^}]+` includes whitespace, so a trailing `\s*` right before `}`
+      // is ambiguous about which of them owns trailing spaces (polynomial
+      // ReDoS on a long unclosed `export {`). Drop the outer `\s*`; each
+      // name is already `.trim()`-ed below, so the captured whitespace is
+      // discarded either way.
+      const namedExportMatch = line.match(/export\s*\{([^}]*)\}/);
       if (namedExportMatch) {
-        const names = namedExportMatch[1].split(',').map(n => n.trim().split(/\s+as\s+/)[0]);
+        // `\s+as\s+` is unanchored and both sides are unbounded, so a long
+        // whitespace-only run with no "as" causes polynomial backtracking
+        // (retried at every position). Bound the run length instead.
+        const names = namedExportMatch[1].split(',').map(n => n.trim().split(/\s{1,20}as\s{1,20}/)[0]);
         exports.push(...names);
       }
     }

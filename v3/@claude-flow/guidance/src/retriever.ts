@@ -625,6 +625,10 @@ export class ShardRetriever {
     let re = this.globCache.get(glob);
     if (!re) {
       const pattern = glob
+        // Escape all regex metacharacters *except* `*` first, so a glob
+        // containing e.g. `.`, `(`, `+` can't be interpreted as regex
+        // syntax (incomplete sanitization otherwise let those through).
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
         .replace(/\*\*/g, '{{GLOBSTAR}}')
         .replace(/\*/g, '[^/]*')
         .replace(/{{GLOBSTAR}}/g, '.*')

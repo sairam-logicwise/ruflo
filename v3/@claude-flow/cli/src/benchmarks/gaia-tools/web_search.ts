@@ -179,14 +179,33 @@ function decodeRawUrl(raw: string): string {
 
 /** Strip HTML tags and decode common entities. */
 function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
+  // Strip tags to a fixed point: a single non-global-looking pass on
+  // '<[^>]+>' only removes non-overlapping matches, so nested/concatenated
+  // fragments like '<<script>script>' would leave '<script>' behind after
+  // one pass (incomplete-multi-character-sanitization). Loop until stable.
+  // Bounded: an unbounded fixed-point loop over attacker-controlled HTML
+  // re-introduces O(n^2) work via nesting depth proportional to input
+  // length, the same risk class the single-pass regex was flagged for.
+  const MAX_STRIP_PASSES = 10;
+  let stripped = html;
+  let prev: string;
+  let passes = 0;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/<[^>]+>/g, '');
+    passes++;
+  } while (stripped !== prev && passes < MAX_STRIP_PASSES);
+
+  // Decode entities with &amp; LAST. Decoding it first can manufacture new
+  // entities (e.g. "&amp;lt;" -> "&lt;") that the later replaces would then
+  // decode a second time (double-escaping), corrupting the output.
+  return stripped
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#x27;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -500,6 +500,27 @@ function resolveMcpCallerIdentity(): { id: string; type: 'agent' | 'legacy' } {
   return { id: token.callerId, type: 'agent' };
 }
 
+/** Field names whose values must never be hashed/logged in the clear. */
+const SENSITIVE_INPUT_KEYS = /password|secret|token|apikey|api_key|credential|private[-_]?key/i;
+
+/**
+ * Redact password/secret/token-shaped fields before an input object is
+ * digested for audit metadata. `inputDigest` below is a fast SHA-256
+ * fingerprint used for request correlation/dedup, not a credential store —
+ * but if a caller's tool arguments happen to include a real password, an
+ * unsalted SHA-256 of that value is crackable by brute force from the audit
+ * trail alone. Strip such fields before hashing rather than hashing them.
+ */
+function redactSensitiveFields(value: unknown, depth = 0): unknown {
+  if (depth > 10 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => redactSensitiveFields(v, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = SENSITIVE_INPUT_KEYS.test(k) ? '[redacted]' : redactSensitiveFields(v, depth + 1);
+  }
+  return out;
+}
+
 export async function authorizeMcpTool(
   toolName: string,
   input: Record<string, unknown>,
@@ -562,7 +583,7 @@ export async function authorizeMcpTool(
       approvalIds: Array.isArray(context.approvalIds) ? context.approvalIds.map(String) : undefined,
       evidence: Array.isArray(context.evidence) ? context.evidence as PolicyEvidence[] : undefined,
       metadata: {
-        inputDigest: `sha256:${createHash('sha256').update(JSON.stringify(input)).digest('hex')}`,
+        inputDigest: `sha256:${createHash('sha256').update(JSON.stringify(redactSensitiveFields(input))).digest('hex')}`,
       },
     },
   }, projectRoot);

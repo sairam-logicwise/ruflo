@@ -128,7 +128,50 @@ const INJECTION_PHRASES = [
   'do anything now',
 ] as const;
 
-const ROLE_SHIFT_RE = /(^|\n)\s*(system|assistant|user|developer)\s*:\s*/gi;
+const ROLE_MARKERS = ['system', 'assistant', 'user', 'developer'] as const;
+
+/**
+ * Find "<newline-or-start><ws>*(system|assistant|user|developer)<ws>*:<ws>*"
+ * occurrences via a manual linear scan instead of a regex.
+ *
+ * An earlier version bounded the `\s*` runs to `\s{0,16}` to close a
+ * polynomial-redos finding, but a fixed bound just moves the hole: padding
+ * past it (`"\n" + " ".repeat(20) + "system:"`) makes every candidate match
+ * fail and the injected role marker goes undetected — confirmed empirically
+ * (0 findings for 20 spaces of padding before the fix below). A manual scan
+ * has no backtracking to bound in the first place, so whitespace of any
+ * length is handled in native O(1)-per-character time with no cap needed.
+ */
+function findRoleShifts(message: string): Array<{ start: number; end: number; marker: string }> {
+  const results: Array<{ start: number; end: number; marker: string }> = [];
+  const lower = message.toLowerCase();
+  const len = message.length;
+
+  // `start`/`end` bound the full match, same as the old regex's m[0] —
+  // `start` is the anchor position (0, or a '\n' index) and `end` is the
+  // position right after the trailing whitespace that follows ':'.
+  const tryMatchAt = (start: number, scanStart: number) => {
+    let i = scanStart;
+    while (i < len && /\s/.test(message[i]!)) i++;
+    for (const marker of ROLE_MARKERS) {
+      if (!lower.startsWith(marker, i)) continue;
+      let j = i + marker.length;
+      while (j < len && /\s/.test(message[j]!)) j++;
+      if (message[j] !== ':') continue;
+      j++;
+      while (j < len && /\s/.test(message[j]!)) j++;
+      results.push({ start, end: j, marker });
+      return;
+    }
+  };
+
+  tryMatchAt(0, 0);
+  for (let k = 0; k < len; k++) {
+    if (message[k] === '\n') tryMatchAt(k, k + 1);
+  }
+  return results;
+}
+
 const BASE64_RE = /\b[A-Za-z0-9+/]{80,}={0,2}/g;
 const HEX_RE = /\b(?:0x)?[a-f0-9]{60,}\b/gi;
 // Zero-width space/joiners, BOM, and bidi-override control characters.
@@ -162,18 +205,16 @@ export function scanChannelMessage(message: string, options: ChannelGuardOptions
 
   // 2) Mid-message role-shift (a leading marker at offset 0 is a legitimate preamble)
   {
-    ROLE_SHIFT_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    let seen = 0;
-    while ((m = ROLE_SHIFT_RE.exec(message)) !== null) {
-      seen++;
-      if (seen === 1 && m.index === 0) continue;
+    const shifts = findRoleShifts(message);
+    for (let seen = 0; seen < shifts.length; seen++) {
+      const m = shifts[seen]!;
+      if (seen === 0 && m.start === 0) continue;
       findings.push({
         kind: 'role-shift',
         severity: 'high',
-        offset: m.index,
-        span: m[0].trim(),
-        reason: `Mid-message role marker (${m[2]}) — classic injection tell`,
+        offset: m.start,
+        span: message.slice(m.start, m.end).trim(),
+        reason: `Mid-message role marker (${m.marker}) — classic injection tell`,
       });
     }
   }
@@ -255,14 +296,25 @@ export function sanitizeChannelMessage(
   sanitized = sanitized.replace(ZWJ_RE, '');
 
   // Strip mid-message role-shift markers, preserving a legitimate leading one.
-  let firstMatchSkipped = false;
-  sanitized = sanitized.replace(ROLE_SHIFT_RE, (match, _leading, _role, offset) => {
-    if (!firstMatchSkipped && offset === 0) {
-      firstMatchSkipped = true;
-      return match;
+  const shifts = findRoleShifts(sanitized);
+  if (shifts.length > 0) {
+    let rebuilt = '';
+    let cursor = 0;
+    let firstMatchSkipped = false;
+    for (const m of shifts) {
+      rebuilt += sanitized.slice(cursor, m.start);
+      const matchText = sanitized.slice(m.start, m.end);
+      if (!firstMatchSkipped && m.start === 0) {
+        firstMatchSkipped = true;
+        rebuilt += matchText;
+      } else {
+        rebuilt += matchText.startsWith('\n') ? '\n' : '';
+      }
+      cursor = m.end;
     }
-    return match.startsWith('\n') ? '\n' : '';
-  });
+    rebuilt += sanitized.slice(cursor);
+    sanitized = rebuilt;
+  }
 
   return { sanitized, result };
 }

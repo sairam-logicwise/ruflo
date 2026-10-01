@@ -170,7 +170,9 @@ function table(headers, rows) {
     `|${headers.map(() => '---').join('|')}|`,
   ];
   for (const row of rows) {
-    lines.push(`| ${row.map(c => String(c).replace(/\|/g, '\\|')).join(' | ')} |`);
+    // Escape backslashes first, or a pre-existing "\|" in a cell would become
+    // "\\|" (an escaped backslash followed by an unescaped, table-breaking pipe).
+    lines.push(`| ${row.map(c => String(c).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')).join(' | ')} |`);
   }
   return lines.join('\n') + '\n';
 }

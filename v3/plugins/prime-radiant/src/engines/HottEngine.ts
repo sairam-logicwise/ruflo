@@ -314,11 +314,19 @@ export class HottEngine implements IHottEngine {
    */
   private parseProposition(prop: string): { type: string; args: string[] } {
     // Simple parsing: A = B, forall x:T. P, exists x:T. P
-    const eqMatch = prop.match(/(.+)\s*=\s*(.+)/);
-    if (eqMatch) {
-      const arg1 = eqMatch[1]?.trim() ?? '';
-      const arg2 = eqMatch[2]?.trim() ?? '';
-      return { type: 'eq', args: [arg1, arg2] };
+    // Split on the first "=" directly instead of a `(.+)\s*=\s*(.+)` regex:
+    // with two greedy `.+` groups either side of `=`, and `.` also matching
+    // the whitespace `\s*` is meant to trim, an input with no `=` forces the
+    // engine to re-try every possible split point (polynomial blowup).
+    // lastIndexOf mirrors the original greedy `(.+)=` behavior, which binds
+    // as much as possible to the left-hand side when "=" appears more than once.
+    const eqIndex = prop.lastIndexOf('=');
+    if (eqIndex !== -1) {
+      const arg1 = prop.slice(0, eqIndex).trim();
+      const arg2 = prop.slice(eqIndex + 1).trim();
+      if (arg1 && arg2) {
+        return { type: 'eq', args: [arg1, arg2] };
+      }
     }
 
     const forallMatch = prop.match(/forall\s+(\w+)\s*:\s*(\w+)\s*\.\s*(.+)/);
@@ -437,8 +445,14 @@ export class HottEngine implements IHottEngine {
     // Beta reduction
     let normalized = term;
 
-    // Simplify refl compositions
-    normalized = normalized.replace(/trans\(refl\(([^)]+)\),\s*([^)]+)\)/g, '$2');
+    // Simplify refl compositions.
+    // The second capture group used to be `([^)]+)` directly after `\s*`;
+    // since `[^)]+` also matches whitespace, the two quantifiers overlap and
+    // an input with no closing ")" makes the engine retry every possible
+    // split between them (polynomial blowup). Requiring the group to start
+    // on a non-whitespace char removes the ambiguity: `\s*` always consumes
+    // the run of whitespace, leaving one unambiguous parse.
+    normalized = normalized.replace(/trans\(refl\(([^)]+)\),\s*([^\s)][^)]*)\)/g, '$2');
     normalized = normalized.replace(/trans\(([^)]+),\s*refl\(([^)]+)\)\)/g, '$1');
 
     // Simplify sym(sym(p)) = p

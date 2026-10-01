@@ -429,8 +429,16 @@ function applyUpdate(doc: Record<string, unknown>, update: Record<string, unknow
 	doc.updatedAt = new Date();
 }
 
+const UNSAFE_KEY_PARTS = new Set(["__proto__", "constructor", "prototype"]);
+
 function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
 	const parts = path.split(".");
+	// A path segment of "__proto__" (etc.) would let traversal below reach
+	// Object.prototype itself, so the final assignment pollutes it for every
+	// object in the process. Refuse the whole path rather than guard only the
+	// last segment, since an unsafe segment earlier in the path is just as
+	// dangerous.
+	if (parts.some((part) => UNSAFE_KEY_PARTS.has(part))) return;
 	let current = obj;
 	for (let i = 0; i < parts.length - 1; i++) {
 		if (!(parts[i] in current) || typeof current[parts[i]] !== "object") {

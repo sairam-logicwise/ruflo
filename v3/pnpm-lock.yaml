@@ -688,6 +688,9 @@ importers:
       express:
         specifier: '>=4.22.2'
         version: 5.2.1
+      express-rate-limit:
+        specifier: ^8.4.1
+        version: 8.6.2(express@5.2.1)
       helmet:
         specifier: ^7.1.0
         version: 7.2.0
@@ -9943,13 +9946,6 @@ packages:
       from2: 2.3.0
       p-is-promise: 3.0.0
 
-  /ip-address@10.1.0:
-    resolution: {integrity: sha512-XXADHxXmvT9+CRxhXg56LJovE+bmWnEWB78LB83VZTprKTmaC5QfruXocxzTZ2Kl0DNwKuBdlIhjL8LeY8Sf8Q==}
-    engines: {node: '>= 12'}
-    requiresBuild: true
-    dev: false
-    optional: true
-
   /ip-address@10.5.0:
     resolution: {integrity: sha512-R5SnVLJmgYYvf2F2ZgwSBnelz5G4q5AxIC277GDfUaNbrZKNANcBC7RHqYYePlszf4kBolVkJauG0ZjHHFh55g==}
     engines: {node: '>= 12'}
@@ -12389,7 +12385,7 @@ packages:
     engines: {node: '>= 10.0.0', npm: '>= 3.0.0'}
     requiresBuild: true
     dependencies:
-      ip-address: 10.1.0
+      ip-address: 10.5.0
       smart-buffer: 4.2.0
     dev: false
     optional: true

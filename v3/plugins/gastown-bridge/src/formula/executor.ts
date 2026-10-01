@@ -427,9 +427,12 @@ class JsFallbackWasmLoader implements IWasmLoader {
         }
 
         // Key-value pairs
-        const kvMatch = trimmed.match(/^(\w+)\s*=\s*"?([^"]*)"?$/);
+        const kvMatch = trimmed.match(/^(\w+)\s*=\s*(.*)$/);
         if (kvMatch) {
-          const [, key, value] = kvMatch;
+          const key = kvMatch[1];
+          let value = kvMatch[2] ?? '';
+          if (value.startsWith('"')) value = value.slice(1);
+          if (value.endsWith('"')) value = value.slice(0, -1);
 
           if (currentSection === 'formula') {
             if (key === 'name') name = value;

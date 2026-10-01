@@ -277,7 +277,19 @@ export class RiskClassifier {
       return { class: 'financial', autonomousAllowed: false, rationale: 'financial action detected', requiredConsent: ['financial-action'] };
     }
     // Class 6 — account mutation
-    if (/(change.*password|reset.*password|update.*email|change.*account|2fa|two.factor)/.test(haystack)) {
+    // Plain substring pairs instead of `word.*word` alternation: the `.*`
+    // between two literals is ambiguous whenever the tail word can recur
+    // in the haystack, which is what made this pattern polynomial-redos.
+    // Order-independence is a strict superset of the old matches (safer
+    // for a risk classifier — false negatives are the bad direction here).
+    if (
+      (haystack.includes('change') && haystack.includes('password')) ||
+      (haystack.includes('reset') && haystack.includes('password')) ||
+      (haystack.includes('update') && haystack.includes('email')) ||
+      (haystack.includes('change') && haystack.includes('account')) ||
+      haystack.includes('2fa') ||
+      (haystack.includes('two') && haystack.includes('factor'))
+    ) {
       return { class: 'account-mutation', autonomousAllowed: false, rationale: 'account mutation detected', requiredConsent: ['account-mutation'] };
     }
     // Class 4 — external submission

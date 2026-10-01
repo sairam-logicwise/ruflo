@@ -117,7 +117,13 @@ function setNestedValue(obj: Record<string, unknown>, key: string, value: unknow
     }
     current = current[part] as Record<string, unknown>;
   }
-  current[parts[parts.length - 1]] = value;
+  // Explicit guard right at the sink, in addition to the upfront scan above:
+  // makes the write provably safe regardless of how `parts` was derived.
+  const finalKey = parts[parts.length - 1];
+  if (DANGEROUS_KEYS.has(finalKey)) {
+    throw new Error(`Dangerous key segment rejected: ${finalKey}`);
+  }
+  current[finalKey] = value;
 }
 
 export const configTools: MCPTool[] = [
@@ -194,6 +200,15 @@ export const configTools: MCPTool[] = [
       const key = input.key as string;
       const value = input.value;
       const scope = (input.scope as string) || 'default';
+
+      // This handler writes `key` directly as a property name (it doesn't
+      // route through setNestedValue), so it needs its own guard: a key of
+      // "__proto__"/"constructor"/"prototype" would otherwise let
+      // config_set hijack store.values'/store.scopes[scope]'s prototype
+      // chain (js/prototype-pollution-utility).
+      if (DANGEROUS_KEYS.has(key)) {
+        return { success: false, error: `Dangerous key rejected: ${key}` };
+      }
 
       const previousValue = store.values[key];
 

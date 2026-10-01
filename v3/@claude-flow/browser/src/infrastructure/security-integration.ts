@@ -5,6 +5,31 @@
 
 import { z } from 'zod';
 
+/**
+ * Apply a global replace repeatedly until the string stops changing.
+ * A single pass over a strip-regex can leave a dangerous construct that
+ * only forms once an *earlier* match is removed (e.g. `<scr<script>ipt>`
+ * reforms into `<script>` after the inner tag is stripped). Looping to a
+ * fixed point closes that nested/malformed-input bypass.
+ *
+ * Bounded to maxPasses: an unbounded fixed-point loop over
+ * attacker-controlled input re-introduces O(n^2) work via nesting depth
+ * proportional to input length — the same risk class the regexes
+ * themselves were flagged for. No legitimate input needs more than a
+ * handful of passes to stabilize.
+ */
+function replaceToFixedPoint(input: string, pattern: RegExp, replacement: string, maxPasses = 10): string {
+  let current = input;
+  let previous: string;
+  let passes = 0;
+  do {
+    previous = current;
+    current = current.replace(pattern, replacement);
+    passes++;
+  } while (current !== previous && passes < maxPasses);
+  return current;
+}
+
 // ============================================================================
 // Security Types
 // ============================================================================
@@ -292,11 +317,28 @@ export class BrowserSecurityScanner {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;');
 
-    // Remove script tags
-    sanitized = sanitized.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    // Remove script tags together with their body text, not just the tag
+    // delimiters — an earlier version of this fix stripped only the open/
+    // close tags, which left `<script>alert(1)</script>` sanitizing down to
+    // the live script body as plain text. (On THIS call path the preceding
+    // entity-escape step already neutralizes any literal `<`/`>` by the
+    // time this runs, so that specific bypass doesn't currently reach a
+    // live `<script>`; this stays as defense-in-depth for callers or future
+    // refactors that don't escape first.) The body span is bounded (not an
+    // unbounded `[\s\S]*?`) so an opening `<script>` with no matching close
+    // anywhere in the input can't force an O(n) lazy scan to be retried
+    // from every position (js/polynomial-redos); the bare-tag alternative
+    // still catches a stray/malformed tag with no body. Looped to a fixed
+    // point so a malformed/nested tag like `<scr<script>ipt>` — which
+    // reforms into a clean `<script>` after a single pass — can't survive.
+    sanitized = replaceToFixedPoint(
+      sanitized,
+      /<script\b[^>]*>[\s\S]{0,100000}?<\/script\s*>|<\/?script\b[^>]*>/gi,
+      ''
+    );
 
-    // Remove event handlers
-    sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+    // Remove event handlers. Looped to a fixed point for the same reason.
+    sanitized = replaceToFixedPoint(sanitized, /\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
 
     return sanitized;
   }

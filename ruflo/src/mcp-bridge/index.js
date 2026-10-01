@@ -964,7 +964,10 @@ function createMcpHandler(groupName) {
           return res.json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
       }
     } catch (err) {
-      console.error(`MCP error [${groupName}/${method}]:`, err);
+      // Fixed format string with groupName/method as substitution args — method
+      // comes from the request body, so it must never be the format string
+      // itself, or a "%s"/"%d" in it would be parsed as a format specifier.
+      console.error("MCP error [%s/%s]:", groupName, method, err);
       return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: err.message } });
     }
   };
@@ -1020,7 +1023,9 @@ app.post("/mcp", async (req, res) => {
         return res.json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
     }
   } catch (err) {
-    console.error(`MCP error [${method}]:`, err);
+    // Fixed format string with `method` as a substitution arg (see the
+    // per-group handler above) — method is attacker-influenced request data.
+    console.error("MCP error [%s]:", method, err);
     return res.json({ jsonrpc: "2.0", id, error: { code: -32603, message: err.message } });
   }
 });
@@ -1682,7 +1687,9 @@ app.post("/chat/completions", async (req, res) => {
       res.send(await upstream.text());
     }
   } catch (err) {
-    console.error(`Proxy error [${providerName}/${model}]:`, err.message);
+    // Fixed format string with providerName/model as substitution args — both
+    // are request-controlled route params.
+    console.error("Proxy error [%s/%s]:", providerName, model, err.message);
     res.status(502).json({ error: { message: `Upstream error: ${err.message}` } });
   }
 });

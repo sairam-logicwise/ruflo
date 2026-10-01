@@ -180,7 +180,11 @@ export class CoverageRouter {
 
   private parseCobertura(data: string): CoverageReport {
     const files: FileCoverage[] = [];
-    const classMatches = data.matchAll(/<class[^>]*filename="([^"]+)"[^>]*line-rate="([^"]+)"[^>]*branch-rate="([^"]+)"[^>]*>/g);
+    // `[^>]*` between each attribute is unbounded and can straddle decoy
+    // occurrences of the following literal (e.g. repeated `filename="`),
+    // giving polynomial/exponential backtracking on malformed XML. Bound
+    // every quantifier to a realistic attribute width to remove it.
+    const classMatches = data.matchAll(/<class[^>]{0,300}filename="([^"]{1,500})"[^>]{0,300}line-rate="([^"]{1,50})"[^>]{0,300}branch-rate="([^"]{1,50})"[^>]{0,300}>/g);
     for (const match of classMatches) {
       files.push({
         path: match[1], lineCoverage: parseFloat(match[2]) * 100, branchCoverage: parseFloat(match[3]) * 100,

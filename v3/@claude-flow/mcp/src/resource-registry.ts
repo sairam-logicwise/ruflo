@@ -361,6 +361,32 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
+   * Build a placeholder-matching regex source from an already-escaped
+   * template. Adjacent placeholders (e.g. `{a}{b}` with no literal text
+   * between them) would otherwise produce back-to-back `[^/]+[^/]+`
+   * groups — two unbounded quantifiers over the *same* character class,
+   * which is the textbook polynomial-redos shape (CodeQL js/polynomial-redos).
+   *
+   * Collapsing N adjacent `[^/]+` groups into a single `[^/]{N,}` keeps the
+   * original minimum-length requirement (each placeholder needed >=1 char,
+   * so N placeholders needed >=N chars total) while removing the ambiguity:
+   * a single quantifier has no overlapping partition to backtrack over,
+   * unlike N back-to-back unbounded groups over the same character class.
+   * (An earlier version collapsed straight to one unbounded `[^/]+`, which
+   * silently dropped the minimum-length requirement — `{a}{b}` started
+   * accepting a single-character segment it used to reject.)
+   */
+  private buildTemplatePattern(escapedTemplate: string): string {
+    const PLACEHOLDER = '[^/]+';
+    return escapedTemplate
+      .replace(/\\\{[^}]+\\\}/g, PLACEHOLDER)
+      .replace(/(?:\[\^\/\]\+)+/g, (run) => {
+        const count = run.length / PLACEHOLDER.length;
+        return count > 1 ? `[^/]{${count},}` : run;
+      });
+  }
+
+  /**
    * Check if URI matches any template
    * SECURITY: Uses escaped regex to prevent ReDoS
    */
@@ -369,8 +395,7 @@ export class ResourceRegistry extends EventEmitter {
       // SECURITY: Escape regex metacharacters before converting template
       // First extract placeholders, escape the rest, then add placeholder pattern
       const escaped = this.escapeRegex(template);
-      // Replace escaped placeholder braces with the pattern
-      const pattern = escaped.replace(/\\\{[^}]+\\\}/g, '[^/]+');
+      const pattern = this.buildTemplatePattern(escaped);
       try {
         const regex = new RegExp('^' + pattern + '$');
         return regex.test(uri);
@@ -382,7 +407,7 @@ export class ResourceRegistry extends EventEmitter {
 
     for (const t of this.templates.keys()) {
       const escaped = this.escapeRegex(t);
-      const pattern = escaped.replace(/\\\{[^}]+\\\}/g, '[^/]+');
+      const pattern = this.buildTemplatePattern(escaped);
       try {
         const regex = new RegExp('^' + pattern + '$');
         if (regex.test(uri)) {

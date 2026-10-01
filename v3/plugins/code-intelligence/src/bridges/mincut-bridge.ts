@@ -517,6 +517,12 @@ export class MinCutBridge implements IMinCutBridge {
     const residual: number[][] = capacity.map(row => [...row]);
     let maxFlow = 0;
 
+    // Validate a value is a safe, in-bounds array index before it's used as a
+    // computed key into `residual` — guards the dynamic-property writes below
+    // against anything other than a plain numeric index.
+    const isSafeIndex = (idx: number | undefined): idx is number =>
+      typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 && idx < n;
+
     // BFS to find augmenting path
     const bfs = (): number[] | null => {
       const parent = new Array(n).fill(-1);
@@ -568,7 +574,7 @@ export class MinCutBridge implements IMinCutBridge {
       for (let i = 0; i < path.length - 1; i++) {
         const from = path[i];
         const to = path[i + 1];
-        if (from !== undefined && to !== undefined) {
+        if (isSafeIndex(from) && isSafeIndex(to)) {
           residual[from]![to] = (residual[from]?.[to] ?? 0) - minCap;
           residual[to]![from] = (residual[to]?.[from] ?? 0) + minCap;
         }

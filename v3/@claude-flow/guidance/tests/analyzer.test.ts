@@ -1278,7 +1278,9 @@ class DifferentialMockExecutor implements IContentAwareExecutor {
     this.hasTestCommands = /npm test|jest|vitest|`test`/i.test(content);
     this.hasArchitecture = /architecture|structure|src\//i.test(content);
     this.hasDeployInfo = /deploy/i.test(content);
-    this.hasEnvVars = /[A-Z_]+=/.test(content);
+    // Mirrors the bounded pattern at src/analyzer.ts (completeness-env-setup
+    // assertion) — bounded to avoid the same O(n^2) backtracking.
+    this.hasEnvVars = /[A-Z_]{1,64}=/.test(content);
   }
 
   async execute(prompt: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {

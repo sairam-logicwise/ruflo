@@ -347,12 +347,32 @@ export const ExecutorConfigSchema = z.object({
  * Sanitizes a string by removing dangerous characters
  */
 export function sanitizeString(input: string): string {
-  return input
-    .replace(/\0/g, '')           // Remove null bytes
-    .replace(/[<>]/g, '')          // Remove HTML brackets
-    .replace(/javascript:/gi, '')  // Remove javascript: protocol
-    .replace(/data:/gi, '')        // Remove data: protocol
-    .trim();
+  let result = input.replace(/\0/g, '').trim(); // Remove null bytes
+
+  // A single non-overlapping pass of each replace can be bypassed by
+  // nesting the forbidden token (e.g. "javascriptjavascript::" strips to
+  // "javascript:"), which CodeQL flags as incomplete sanitization /
+  // incomplete URL-scheme check. Loop to a fixed point instead.
+  //
+  // Bounded to MAX_SANITIZE_PASSES: an unbounded fixed-point loop over
+  // attacker-controlled input re-introduces the same O(n^2) class of risk
+  // the single-pass regexes were flagged for in the first place — each
+  // pass is O(n), and nesting depth (hence pass count) can be made
+  // proportional to input length. No legitimate input needs more than a
+  // handful of passes to stabilize.
+  const MAX_SANITIZE_PASSES = 10;
+  let previous: string;
+  let passes = 0;
+  do {
+    previous = result;
+    result = result
+      .replace(/[<>]/g, '')          // Remove HTML brackets
+      .replace(/javascript:/gi, '')  // Remove javascript: protocol
+      .replace(/data:/gi, '');       // Remove data: protocol
+    passes++;
+  } while (result !== previous && passes < MAX_SANITIZE_PASSES);
+
+  return result;
 }
 
 /**

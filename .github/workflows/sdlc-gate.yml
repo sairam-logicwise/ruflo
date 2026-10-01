@@ -17,6 +17,9 @@ env:
   NODE_VERSION: '20'
   PNPM_VERSION: '8'
 
+permissions:
+  contents: read
+
 jobs:
   sdlc-gate:
     name: Record validation + phase-gate consistency (T15/T16/T17)

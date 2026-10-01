@@ -390,8 +390,12 @@ export class ThreatLearningService {
     // Extract structural patterns
     if (input.includes('```')) patterns.push('code_block');
     if (input.includes('system:')) patterns.push('system_reference');
-    if (/\[.*\]/.test(input)) patterns.push('bracket_notation');
-    if (/<.*>/.test(input)) patterns.push('xml_like');
+    // Negated character classes (instead of `.`) keep these linear-time:
+    // `.` overlaps with the closing delimiter, forcing backtracking on
+    // non-matching input; `[^\]]`/`[^>]` can't match the delimiter, so
+    // there's nothing ambiguous to backtrack through.
+    if (/\[[^\]]*\]/.test(input)) patterns.push('bracket_notation');
+    if (/<[^>]*>/.test(input)) patterns.push('xml_like');
     if (input.length > 500) patterns.push('long_input');
     if (input.split('\n').length > 5) patterns.push('multiline');
 
