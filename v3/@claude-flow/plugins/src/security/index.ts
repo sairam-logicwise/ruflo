@@ -360,7 +360,10 @@ const SENSITIVE_PATTERNS = [
   // Bounded (`{1,N}` instead of unbounded `+`) so an unanchored scan over
   // a long, non-matching error message can't hit quadratic backtracking
   // (js/polynomial-redos) — credentials in a URL are never this long.
-  /\/\/[^:@/]{1,256}:[^@/]{1,256}@/g,  // Credentials in URLs
+  // Character classes match the original (`[^:]`/`[^@]`): excluding `/`
+  // here too silently stopped redacting any password containing a slash
+  // (common in base64, e.g. "postgres://user:ab/cd+ef@host/db").
+  /\/\/[^:]{1,256}:[^@]{1,256}@/g,  // Credentials in URLs
 ];
 
 /**

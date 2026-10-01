@@ -255,13 +255,10 @@ export class HttpTransport extends EventEmitter implements ITransport {
       }));
     }
 
-    // Body parsing
-    this.app.use(express.json({
-      limit: this.config.maxRequestSize || '10mb',
-    }));
-
-    // Bound authenticated and unauthenticated RPC traffic before route-level
-    // authorization or request dispatch can consume significant resources.
+    // Bound authenticated and unauthenticated RPC traffic BEFORE body
+    // parsing — mounting this after express.json() would let a burst of
+    // near-maxRequestSize bodies all pay full JSON-parse cost before most
+    // of them get rejected, defeating the point of rate-limiting here.
     this.app.use(['/rpc', '/mcp'], rateLimit({
       windowMs: this.config.rateLimit?.windowMs ?? 60_000,
       limit: this.config.rateLimit?.limit ?? 120,
@@ -272,6 +269,11 @@ export class HttpTransport extends EventEmitter implements ITransport {
         id: null,
         error: { code: -32000, message: 'Rate limit exceeded' },
       },
+    }));
+
+    // Body parsing
+    this.app.use(express.json({
+      limit: this.config.maxRequestSize || '10mb',
     }));
 
     // Request timeout

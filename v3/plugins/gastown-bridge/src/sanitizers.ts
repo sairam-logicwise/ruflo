@@ -518,12 +518,19 @@ function sanitizePath(value: string): string {
   // Remove path traversal sequences. Loop to a fixed point: a single pass
   // can leave a new "../" behind when sequences overlap/nest, e.g. stripping
   // "../" once from "....//" leaves "../" (chars either side of the removed
-  // match rejoin into a fresh traversal token).
+  // match rejoin into a fresh traversal token). Bounded to 10 passes — an
+  // unbounded loop over attacker-controlled input would reintroduce O(n^2)
+  // work via nesting depth proportional to input length, and `value` is
+  // already capped to 256 chars by sanitizeString() above, so 10 passes is
+  // generous for any realistic nesting.
+  const MAX_PASSES = 10;
   let previous: string;
+  let passes = 0;
   do {
     previous = result;
     result = result.replace(/\.\.\//g, '').replace(/\.\.\\/g, '');
-  } while (result !== previous);
+    passes++;
+  } while (result !== previous && passes < MAX_PASSES);
 
   // Remove leading slashes that could be absolute paths
   result = result.replace(/^[\/\\]+/, '');

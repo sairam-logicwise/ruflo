@@ -189,17 +189,25 @@ class MockQESecurityBridge {
     // "javascriptjavascript::") can't survive a single non-overlapping pass,
     // and match "javascript:" with optional whitespace/control characters
     // between its letters since browsers ignore those when resolving a
-    // scheme (e.g. "java\tscript:" still executes).
+    // scheme (e.g. "java\tscript:" still executes). The body span is
+    // bounded (not an unbounded [\s\S]*?) so an opening <script> with no
+    // matching close anywhere in the input can't force a retry from every
+    // position (polynomial-redos); the loop is bounded to 10 passes for
+    // the same reason — nesting depth could otherwise be made proportional
+    // to input length.
+    const MAX_PASSES = 10;
     let sanitized = input;
     let previous: string;
+    let passes = 0;
     do {
       previous = sanitized;
       sanitized = sanitized
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<script[^>]*>[\s\S]{0,100000}?<\/script>/gi, '')
         .replace(/<\/?script[^>]*>/gi, '')
         .replace(/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi, '')
         .replace(/on\w+\s*=/gi, '');
-    } while (sanitized !== previous);
+      passes++;
+    } while (sanitized !== previous && passes < MAX_PASSES);
     return sanitized;
   }
 

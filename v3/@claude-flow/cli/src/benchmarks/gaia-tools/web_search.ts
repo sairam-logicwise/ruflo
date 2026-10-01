@@ -183,12 +183,18 @@ function stripHtml(html: string): string {
   // '<[^>]+>' only removes non-overlapping matches, so nested/concatenated
   // fragments like '<<script>script>' would leave '<script>' behind after
   // one pass (incomplete-multi-character-sanitization). Loop until stable.
+  // Bounded: an unbounded fixed-point loop over attacker-controlled HTML
+  // re-introduces O(n^2) work via nesting depth proportional to input
+  // length, the same risk class the single-pass regex was flagged for.
+  const MAX_STRIP_PASSES = 10;
   let stripped = html;
   let prev: string;
+  let passes = 0;
   do {
     prev = stripped;
     stripped = stripped.replace(/<[^>]+>/g, '');
-  } while (stripped !== prev);
+    passes++;
+  } while (stripped !== prev && passes < MAX_STRIP_PASSES);
 
   // Decode entities with &amp; LAST. Decoding it first can manufacture new
   // entities (e.g. "&amp;lt;" -> "&lt;") that the later replaces would then

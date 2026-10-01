@@ -201,6 +201,15 @@ export const configTools: MCPTool[] = [
       const value = input.value;
       const scope = (input.scope as string) || 'default';
 
+      // This handler writes `key` directly as a property name (it doesn't
+      // route through setNestedValue), so it needs its own guard: a key of
+      // "__proto__"/"constructor"/"prototype" would otherwise let
+      // config_set hijack store.values'/store.scopes[scope]'s prototype
+      // chain (js/prototype-pollution-utility).
+      if (DANGEROUS_KEYS.has(key)) {
+        return { success: false, error: `Dangerous key rejected: ${key}` };
+      }
+
       const previousValue = store.values[key];
 
       if (scope === 'default') {

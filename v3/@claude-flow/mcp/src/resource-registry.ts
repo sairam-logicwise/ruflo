@@ -366,14 +366,24 @@ export class ResourceRegistry extends EventEmitter {
    * between them) would otherwise produce back-to-back `[^/]+[^/]+`
    * groups — two unbounded quantifiers over the *same* character class,
    * which is the textbook polynomial-redos shape (CodeQL js/polynomial-redos).
-   * Collapsing consecutive placeholder groups into one is a no-op for
-   * matching semantics (both require 1+ non-`/` chars in that span) and
-   * removes the ambiguity entirely.
+   *
+   * Collapsing N adjacent `[^/]+` groups into a single `[^/]{N,}` keeps the
+   * original minimum-length requirement (each placeholder needed >=1 char,
+   * so N placeholders needed >=N chars total) while removing the ambiguity:
+   * a single quantifier has no overlapping partition to backtrack over,
+   * unlike N back-to-back unbounded groups over the same character class.
+   * (An earlier version collapsed straight to one unbounded `[^/]+`, which
+   * silently dropped the minimum-length requirement — `{a}{b}` started
+   * accepting a single-character segment it used to reject.)
    */
   private buildTemplatePattern(escapedTemplate: string): string {
+    const PLACEHOLDER = '[^/]+';
     return escapedTemplate
-      .replace(/\\\{[^}]+\\\}/g, '[^/]+')
-      .replace(/(?:\[\^\/\]\+)+/g, '[^/]+');
+      .replace(/\\\{[^}]+\\\}/g, PLACEHOLDER)
+      .replace(/(?:\[\^\/\]\+)+/g, (run) => {
+        const count = run.length / PLACEHOLDER.length;
+        return count > 1 ? `[^/]{${count},}` : run;
+      });
   }
 
   /**
